@@ -19,7 +19,19 @@ python = "^3.11"
 pygithub = "^2.3.0"
 python-dotenv = "^1.0.1"
 
+[tool.poetry.group.dev.dependencies]
+black = "^24.4.2"
+isort = "^5.13.2"
+mypy = "^1.10.0"
+flake8 = "^7.0.0"
+pytest = "^8.2.2"
+
+[tool.isort]
+profile = "black"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+addopts = "-vv"
