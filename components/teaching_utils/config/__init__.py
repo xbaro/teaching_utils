@@ -1,3 +1,3 @@
-from teaching_utils.config import core
+from teaching_utils.config.core import settings
 
-__all__ = ["core"]
+__all__ = ["settings"]
