@@ -7,8 +7,9 @@ if __name__ == '__main__':
 
     # logging.basicConfig(filename='myapp.log', level=logging.INFO)
     logging.basicConfig(level=logging.DEBUG)
+    #logging.basicConfig(level=logging.INFO)
 
     repositories = teaching_lib.repository.CodeReposotorySet()
-    repositories.load_repositories('GiVD2023/p2-zbtoy-b', 1,9)
+    repositories.load_repositories('SoftwareDistribuitUB-2024/practica2-b', 1,20)
 
     repositories.clone_all(force=False)

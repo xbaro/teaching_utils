@@ -4,7 +4,7 @@ import requests
 from github import Github, GithubException
 from github import Auth
 from github.Repository import Repository
-from ..config import settings
+from teaching_utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def get_repository_range(base: str, range_min: int = 1, range_max: int = 25) -> 
     return repos
 
 
-def clone_repository(repo: Repository | str) -> str | None:
+def clone_repository(repo: Repository | str, export_path: str = None, force: bool = False) -> str | None:
     repo_obj = None
     if isinstance(repo, Repository):
         repo_obj = repo
@@ -68,7 +68,14 @@ def clone_repository(repo: Repository | str) -> str | None:
 
     repo_local_path = None
     if repo_obj is not None:
-        repo_local_path = os.path.join(settings.EXPORT_PATH, repo_obj.name)
+        if export_path is None:
+            export_path = settings.EXPORT_PATH
+        repo_local_path = os.path.join(export_path, repo_obj.name)
+        if os.path.exists(repo_local_path):
+            logger.info('Target path %s already exists', repo_local_path)
+            if force:
+                logger.info('Target path %s DELETED', repo_local_path)
+                os.removedirs(repo_local_path)
         contents = repo_obj.get_contents("")
         while contents:
             file_content = contents.pop(0)
@@ -77,6 +84,9 @@ def clone_repository(repo: Repository | str) -> str | None:
             else:
                 logger.debug('Repository: %s => Cloning file %s', repo_obj.name, file_content.path)
                 full_path = os.path.join(repo_local_path, file_content.path)
+                if os.path.exists(full_path):
+                    logger.debug('Repository: %s => File SKIPPED %s', repo_obj.name, file_content.path)
+                    continue
                 file_content_decoded = None
                 try:
                     os.makedirs(os.path.dirname(full_path), exist_ok=True)

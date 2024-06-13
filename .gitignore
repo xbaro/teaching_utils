@@ -162,3 +162,5 @@ cython_debug/
 #.idea/
 
 !components/teaching_utils/lib
+
+/_data
