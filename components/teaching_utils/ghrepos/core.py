@@ -33,6 +33,24 @@ def get_repository(name: str) -> Repository:
     return repo
 
 
+def get_repository_idx(base: str, index: int):
+
+    # Get a new client instance
+    client = gh_client()
+
+    try:
+        repo = client.get_repo(f'{base}{index:02d}')
+    except GithubException:
+        try:
+            repo = client.get_repo(f'{base}{index}')
+        except GithubException:
+            repo = None
+
+    client.close()
+
+    return repo
+
+
 def get_repository_range(base: str, range_min: int = 1, range_max: int = 25) -> list[Repository]:
 
     # Get a new client instance
@@ -107,3 +125,79 @@ def clone_repository(repo: Repository | str, export_path: str = None, force: boo
                     logger.error('Failed to clone repository file: %s', file_content.path)
 
     return repo_local_path
+
+
+def get_repository_stats(repo: Repository):
+    # Get a new client instance
+    client = gh_client()
+
+    branches_data = repo.get_branches()
+
+    branches_stats = {
+        'total': branches_data.totalCount,
+        'data': list(branches_data),
+        'commits': {}
+    }
+
+    contributors = {
+        'data': {},
+        'total': 0,
+        'contributors': []
+    }
+
+    commits_data = {
+        'total': 0,
+        'data': {}
+    }
+
+    for branch in branches_data:
+        branch_commits = repo.get_commits(branch.name)
+        for bc in branch_commits:
+            if bc.author.id not in contributors['data']:
+                contributors['data'][bc.author.id] = {
+                    'info': bc.author,
+                    'commits': {},
+                    'branches': {}
+                }
+            if branch.name not in contributors['data'][bc.author.id]['branches']:
+                contributors['data'][bc.author.id]['branches'][branch.name] = branch
+            contributors['data'][bc.author.id]['commits'][bc.sha] = bc
+            if branch.name not in branches_stats['commits']:
+                branches_stats['commits'][branch.name] = {}
+            branches_stats['commits'][branch.name][bc.sha] = bc
+            commits_data['total'] += 1
+            commits_data['data'][bc.sha] = {
+                'data': bc,
+                'branch': branch.name,
+                'author': bc.author
+            }
+
+    contributors['total'] = len(contributors['data'])
+    for contributor_id in contributors['data']:
+        contributor = contributors['data'][contributor_id]
+        c_stats = {
+            'id': contributor_id,
+            'name': contributor['info'].name,
+            'login': contributor['info'].login,
+            'num_branches': len(contributor['branches']),
+            'num_commits': len(contributor['commits']),
+            'total_additions': 0,
+            'total_deletions': 0
+        }
+
+        for cc in contributor['commits']:
+            commit_data = contributor['commits'][cc]
+            c_stats['total_additions'] += commit_data.stats.additions
+            c_stats['total_deletions'] += commit_data.stats.deletions
+        contributors['contributors'].append(c_stats)
+
+    stats = {
+        'branches': branches_stats,
+        'commits': commits_data,
+        'contributors': contributors
+    }
+
+    # To close connections after use
+    client.close()
+
+    return stats
