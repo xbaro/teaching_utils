@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "teaching-utils"
+version = "0.1.0"
+description = "Utilities for teaching"
+authors = ["Xavier Baró <xbaro@ub.edu>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/xbaro/teaching_utils"
+repository = "https://github.com/xbaro/teaching_utils"
+packages = [
+    {include = "teaching_utils/teaching_lib",from = "bases"},
+    {include = "teaching_utils/config", from = "components"},
+    {include = "teaching_utils/ghrepos", from = "components"},
+    {include = "development"},
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
