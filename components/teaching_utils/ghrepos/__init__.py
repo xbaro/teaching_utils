@@ -4,6 +4,7 @@ from teaching_utils.ghrepos.core import (
     get_repository,
     get_repository_idx,
     get_repository_stats,
+    export_files,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "get_repository",
     "get_repository_idx",
     "get_repository_stats",
+    "export_files",
 ]

@@ -1,7 +1,7 @@
 import os.path
 
 from github.Repository import Repository
-from teaching_utils import ghrepos, config
+from teaching_utils import ghrepos, config, testing
 
 
 class CodeRepository:
@@ -25,6 +25,16 @@ class CodeRepository:
 
     def get_stats(self) -> dict:
         return ghrepos.get_repository_stats(self._repository)
+
+    def export_files(self, export_prefix: str, path_filter: str = None, extension_filter: str = None):
+        ghrepos.export_files(self._repository, export_prefix, path_filter, extension_filter)
+
+    def test(self, language: str, relative_path: str = None):
+        src_path = self._local_path
+        if relative_path is not None:
+            src_path = os.path.abspath(os.path.join(src_path, relative_path))
+
+        return testing.run_tests(language, src_path)
 
 
 class CodeReposotorySet:
@@ -55,4 +65,27 @@ class CodeReposotorySet:
         for repo_name in self._repos:
             self._repos[repo_name].clone(export_path, force)
 
+    def export_files(self, export_prefix: str, path_filter: str = None, extension_filter: str = None):
+        for repo_name in self._repos:
+            self._repos[repo_name].export_files(export_prefix, path_filter, extension_filter)
+
+    def print_stats(self):
+        for repo_name in self._repos:
+            stats = self._repos[repo_name].get_stats()
+            print("=====================================================================================================")
+            print(f'{repo_name}')
+            print("=====================================================================================================")
+            print("  CONTRIBUTORS")
+            print("  ---------------------------------------------------------------------------------------------------")
+            print(f"  | {'user[login]':35} | {'+':9} | {'-':9} | {'c':3} | {'b':3} | {'+/c':9} | {'-/c':9} |")
+            print("  ---------------------------------------------------------------------------------------------------")
+            for contributor in stats['contributors']['contributors']:
+                name = ''
+                if contributor['name'] is not None:
+                    name = contributor['name']
+                if contributor['login'] is not None:
+                    name += f'[{contributor["login"]}]'
+                print(f"  | {name:35} | {contributor['total_additions']:9} | {contributor['total_deletions']:9} | {contributor['num_commits']:3} | {contributor['num_branches']:3} | {contributor['total_additions']/contributor['num_commits']:6.2f} | {contributor['total_deletions']/contributor['num_commits']:6.2f} |")
+            print("  ---------------------------------------------------------------------------------------------------")
+            print("=====================================================================================================")
 

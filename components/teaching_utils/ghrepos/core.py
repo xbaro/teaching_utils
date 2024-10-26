@@ -3,7 +3,9 @@ import logging
 import requests
 from github import Github, GithubException
 from github import Auth
+from github.NamedUser import NamedUser
 from github.Repository import Repository
+from github.ContentFile import ContentFile
 from teaching_utils.config import settings
 
 logger = logging.getLogger(__name__)
@@ -74,6 +76,24 @@ def get_repository_range(base: str, range_min: int = 1, range_max: int = 25) -> 
 
     return repos
 
+
+def _save_file(repo: Repository, file_content: ContentFile, target_path):
+    file_content_decoded = None
+    try:
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        file_content_decoded = file_content.decoded_content
+    except AssertionError as e:
+        resp = requests.get(repo.get_contents(file_content.path).download_url)
+        if resp.status_code == 200:
+            if resp.encoding is not None:
+                file_content_decoded = resp.content.decode(resp.encoding)
+            else:
+                file_content_decoded = resp.content
+    if file_content_decoded is not None:
+        if isinstance(file_content_decoded, str):
+            file_content_decoded = file_content_decoded.encode()
+        with open(target_path, 'wb') as f:
+            f.write(file_content_decoded)
 
 def clone_repository(repo: Repository | str, export_path: str = None, force: bool = False) -> str | None:
     repo_obj = None
@@ -153,15 +173,24 @@ def get_repository_stats(repo: Repository):
     for branch in branches_data:
         branch_commits = repo.get_commits(branch.name)
         for bc in branch_commits:
-            if bc.author.id not in contributors['data']:
-                contributors['data'][bc.author.id] = {
-                    'info': bc.author,
+            author = bc.author
+            if author is None:
+                for user in repo.get_contributors():
+                    if user.login == bc.commit.author.name or user.email == bc.commit.author.email:
+                        author = user
+                        break
+            if author is None:
+                continue
+
+            if author.id not in contributors['data']:
+                contributors['data'][author.id] = {
+                    'info': author,
                     'commits': {},
                     'branches': {}
                 }
-            if branch.name not in contributors['data'][bc.author.id]['branches']:
-                contributors['data'][bc.author.id]['branches'][branch.name] = branch
-            contributors['data'][bc.author.id]['commits'][bc.sha] = bc
+            if branch.name not in contributors['data'][author.id]['branches']:
+                contributors['data'][author.id]['branches'][branch.name] = branch
+            contributors['data'][author.id]['commits'][bc.sha] = bc
             if branch.name not in branches_stats['commits']:
                 branches_stats['commits'][branch.name] = {}
             branches_stats['commits'][branch.name][bc.sha] = bc
@@ -169,7 +198,7 @@ def get_repository_stats(repo: Repository):
             commits_data['data'][bc.sha] = {
                 'data': bc,
                 'branch': branch.name,
-                'author': bc.author
+                'author': author
             }
 
     contributors['total'] = len(contributors['data'])
@@ -191,13 +220,43 @@ def get_repository_stats(repo: Repository):
             c_stats['total_deletions'] += commit_data.stats.deletions
         contributors['contributors'].append(c_stats)
 
+    runs = {
+        'data': {},
+        'total': 0,
+        'last': None,
+        'workflows': {}
+    }
+
+    for wr in repo.get_workflow_runs():
+        logs_req = requests.get(wr.logs_url, headers = wr.raw_headers)
+        logs = None
+        if logs_req.status_code == 200:
+            logs = logs_req.content
+
+
+
+
     stats = {
         'branches': branches_stats,
         'commits': commits_data,
-        'contributors': contributors
+        'contributors': contributors,
+        'runs': runs
     }
 
     # To close connections after use
     client.close()
 
     return stats
+
+
+def export_files(repo: Repository, export_prefix: str, path_filter: str = None, extension_filter: str = None):
+    if path_filter is not None:
+        files = repo.get_contents(path_filter)
+    else:
+        files = repo.get_contents()
+
+    for file in files:
+        if extension_filter is not None and file.name.endswith(extension_filter):
+            target_path = os.path.abspath(os.path.join(export_prefix, f'{repo.name}__{file.name}'))
+            _save_file(repo, file, target_path)
+            print(file.name)
