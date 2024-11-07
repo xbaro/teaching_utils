@@ -16,7 +16,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.9,<=3.12"
 pygithub = "^2.3.0"
 python-dotenv = "^1.0.1"
 
@@ -26,6 +26,7 @@ isort = "^5.13.2"
 mypy = "^1.10.0"
 flake8 = "^7.0.0"
 pytest = "^8.2.2"
+pylint = "^3.3.1"
 
 [tool.isort]
 profile = "black"
@@ -39,3 +40,6 @@ addopts = [
     "--import-mode=importlib",
     "-vv",
 ]
+
+[tool.pylint]
+max-line-length = 120

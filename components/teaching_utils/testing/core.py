@@ -4,7 +4,7 @@ import signal
 import subprocess
 import sys
 
-from teaching_utils.config import settings
+# from teaching_utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ def run_pytest(code_path: str):
     _run_shell_cmd(['poetry', 'install'], code_path)
     _run_shell_cmd(['poetry', 'run', 'test'], code_path)
     return None
+
 
 def _run_shell_cmd(cmd: list[str], working_path: str, timeout_s: int = 30):
     try:

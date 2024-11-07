@@ -2,6 +2,7 @@ import os
 from os import environ
 from dotenv import dotenv_values
 
+
 class Config:
 
     def __init__(self):
@@ -21,7 +22,7 @@ class Config:
         return attr
 
     GITHUB_TOKEN = 'invalid'
-    EXPORT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..','..','_data'))
+    EXPORT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '_data'))
 
 
 settings = Config()

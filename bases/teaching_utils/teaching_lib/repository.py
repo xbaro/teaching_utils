@@ -85,7 +85,6 @@ class CodeReposotorySet:
                     name = contributor['name']
                 if contributor['login'] is not None:
                     name += f'[{contributor["login"]}]'
-                print(f"  | {name:35} | {contributor['total_additions']:9} | {contributor['total_deletions']:9} | {contributor['num_commits']:3} | {contributor['num_branches']:3} | {contributor['total_additions']/contributor['num_commits']:6.2f} | {contributor['total_deletions']/contributor['num_commits']:6.2f} |")
+                print(f"  | {name:35} | {contributor['total_additions']:9} | {contributor['total_deletions']:9} | {contributor['num_commits']:3} | {contributor['num_branches']:3} | {contributor['total_additions']/contributor['num_commits']:6.2f} | {contributor['total_deletions']/contributor['num_commits']:6.2f} |")  # noqa: E501
             print("  ---------------------------------------------------------------------------------------------------")
             print("=====================================================================================================")
-

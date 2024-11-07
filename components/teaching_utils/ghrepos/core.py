@@ -3,7 +3,6 @@ import logging
 import requests
 from github import Github, GithubException
 from github import Auth
-from github.NamedUser import NamedUser
 from github.Repository import Repository
 from github.ContentFile import ContentFile
 from teaching_utils.config import settings
@@ -82,7 +81,7 @@ def _save_file(repo: Repository, file_content: ContentFile, target_path):
     try:
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         file_content_decoded = file_content.decoded_content
-    except AssertionError as e:
+    except AssertionError:
         resp = requests.get(repo.get_contents(file_content.path).download_url)
         if resp.status_code == 200:
             if resp.encoding is not None:
@@ -95,7 +94,9 @@ def _save_file(repo: Repository, file_content: ContentFile, target_path):
         with open(target_path, 'wb') as f:
             f.write(file_content_decoded)
 
-def clone_repository(repo: Repository | str, export_path: str = None, force: bool = False) -> str | None:
+
+def clone_repository(repo: Repository | str, export_path: str = None, force: bool = False) -> str | None:  # noqa: C901
+    # TODO: Reduce complexity
     repo_obj = None
     if isinstance(repo, Repository):
         repo_obj = repo
@@ -129,7 +130,7 @@ def clone_repository(repo: Repository | str, export_path: str = None, force: boo
                 try:
                     os.makedirs(os.path.dirname(full_path), exist_ok=True)
                     file_content_decoded = file_content.decoded_content
-                except AssertionError as e:
+                except AssertionError:
                     resp = requests.get(repo_obj.get_contents(file_content.path).download_url)
                     if resp.status_code == 200:
                         if resp.encoding is not None:
@@ -147,7 +148,8 @@ def clone_repository(repo: Repository | str, export_path: str = None, force: boo
     return repo_local_path
 
 
-def get_repository_stats(repo: Repository):
+def get_repository_stats(repo: Repository):  # noqa: C901
+    # TODO: Reduce complexity
     # Get a new client instance
     client = gh_client()
 
@@ -228,19 +230,17 @@ def get_repository_stats(repo: Repository):
     }
 
     for wr in repo.get_workflow_runs():
-        logs_req = requests.get(wr.logs_url, headers = wr.raw_headers)
+        logs_req = requests.get(wr.logs_url, headers=wr.raw_headers)
         logs = None
         if logs_req.status_code == 200:
             logs = logs_req.content
-
-
-
 
     stats = {
         'branches': branches_stats,
         'commits': commits_data,
         'contributors': contributors,
-        'runs': runs
+        'runs': runs,
+        'logs': logs
     }
 
     # To close connections after use
