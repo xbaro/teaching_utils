@@ -1,5 +1,5 @@
-from teaching_utils.teaching_lib import core
+from teaching_utils.teaching_lib import repository
 
 
 def test_sample():
-    assert core is not None
+    assert repository is not None

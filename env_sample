@@ -1,0 +1,5 @@
+# Path where data is exported. By default, _data folder is used.
+#EXPORT_PATH=
+
+# GitHub application token to access GH repositories.
+GITHUB_TOKEN=

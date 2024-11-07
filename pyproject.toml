@@ -11,7 +11,7 @@ packages = [
     {include = "teaching_utils/teaching_lib",from = "bases"},
     {include = "teaching_utils/config", from = "components"},
     {include = "teaching_utils/ghrepos", from = "components"},
-    {include = "teaching_utils/testing", from = "components"},
+    #{include = "teaching_utils/testing", from = "components"},
     {include = "development"},
 ]
 
@@ -35,4 +35,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
-addopts = "-vv"
+addopts = [
+    "--import-mode=importlib",
+    "-vv",
+]
