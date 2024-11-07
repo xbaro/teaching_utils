@@ -1,3 +1,6 @@
+[![Python package](https://github.com/xbaro/teaching_utils/actions/workflows/python-package.yml/badge.svg?branch=main)](https://github.com/xbaro/teaching_utils/actions/workflows/python-package.yml)
+![versions](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)
+
 # teaching_utils
 Tools for teaching
 
