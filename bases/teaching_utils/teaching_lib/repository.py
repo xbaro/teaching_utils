@@ -2,23 +2,19 @@ import os.path
 
 from github.Repository import Repository
 from teaching_utils import ghrepos, config, testing
+from .submissions import Submission, SubmissionSet
 
 
-class CodeRepository:
+class CodeRepository(Submission):
 
     def __init__(self, repository: Repository | str, export_path: str = None):
         if isinstance(repository, Repository):
             self._repository = repository
-            self._name = repository.name
+            name = repository.name
         else:
-            self._name = repository
+            name = repository
             self._repository = ghrepos.get_repository(repository)
-
-        self._local_path = None
-        if export_path is None:
-            export_path = config.settings.EXPORT_PATH
-            if os.path.exists(os.path.join(export_path, self._name)):
-                self._local_path = os.path.join(export_path, self._name)
+        super().__init__(name=name, export_path=export_path)
 
     def clone(self, export_path: str = None, force: bool = False):
         self._local_path = ghrepos.clone_repository(self._repository, export_path, force)
@@ -37,11 +33,11 @@ class CodeRepository:
         return testing.run_tests(language, src_path)
 
 
-class CodeReposotorySet:
+class CodeRepositorySet(SubmissionSet):
 
     def __init__(self, export_path: str = None):
+        super().__init__(export_path=export_path)
         self._repos: dict[str, CodeRepository] = {}
-        self._export_path = export_path
 
     def __getitem__(self, index):
         return self._repos[list(self._repos.keys())[index]]
