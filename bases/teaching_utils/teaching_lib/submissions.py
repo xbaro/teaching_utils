@@ -16,6 +16,7 @@ class Submission:
         self._local_path = None
         self._info = {}
         self._key = key
+        self._groups = []
         if export_path is None:
             export_path = config.settings.EXPORT_PATH
             if os.path.exists(os.path.join(export_path, self._key)):
@@ -61,6 +62,13 @@ class Submission:
                         with tarfile.open(dest_file, 'r') as tar_ref:
                             tar_ref.extractall(extract_folder)
 
+    def export(self, output_folder: str, exist_ok: bool = False, remove_existing: bool = False):
+        if os.path.exists(output_folder) and remove_existing:
+            os.remove(output_folder)
+
+        os.makedirs(self._local_path, exist_ok=exist_ok)
+
+        shutil.copy2(output_folder, self._local_path)
 
 class SubmissionSet:
     def __init__(self, export_path: str = None):
@@ -119,6 +127,14 @@ class SubmissionSet:
 
     def get_submissions(self) -> dict[str, Submission]:
         return self._submissions
+
+    def exportGroup(self, group: str, output_folder: str, exist_ok: bool = False, remove_existing: bool = False):
+        SubmissionSet filtered_submissions = SubmissionSet(os.path.join(self._export_path, self.clean_filename(group)))
+
+        for key, submission in self._submissions.items():
+            pass
+
+
 
 class MoodleSubmissionSet(SubmissionSet):
     def __init__(self, class_csv: str = None, export_path: str = None):
@@ -180,6 +196,7 @@ class MoodleSubmission (Submission):
         self._student_name = None
         self._student_surname = None
         self._student_groups = []
+        self._groups = set([])
         self._info['type'] = 'MoodleSubmission'
 
     def set_data(self, submission_id, student_id, name, surname, full_name, groups = None):
@@ -191,6 +208,7 @@ class MoodleSubmission (Submission):
         if groups is None:
             groups = []
         self._student_groups = groups
+        self._groups = set(groups)
         super().add_info('submission_id', submission_id)
         super().add_info('student', {
             'id': student_id,

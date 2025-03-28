@@ -16,6 +16,9 @@ if __name__ == '__main__':
 
     submissions.load_submissions('../_data/ed/pr1/lliuraments')
 
+    group = 'GrupA'
+    grupA = submissions.exportGroup(group=group, f'../_data/ed/pr1/out/groups/{group}')
+
     print(len(submissions.get_submissions()))
 
 
