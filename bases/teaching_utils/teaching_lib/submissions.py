@@ -1,5 +1,6 @@
 from csv import reader
 import os
+import pickle
 import shutil
 import zipfile
 import tarfile
@@ -12,17 +13,43 @@ from teaching_utils import config
 
 class Submission:
 
-    def __init__(self, key: str = None, export_path: str = None):
-        self._local_path = None
-        self._info = {}
-        self._key = key
-        self._groups = []
-        if export_path is None:
-            export_path = config.settings.EXPORT_PATH
-            if os.path.exists(os.path.join(export_path, self._key)):
-                self._local_path = os.path.join(export_path, self._key)
+    def __init__(self, key: str = None, export_path: str = None, info: dict = None):
+        self.valid = True
+        self.error = None
+        if info is None:
+            self._local_path = None
+            self._info = {}
+            self._key = key
+            self._groups = []
+            self._students = []
+            self._submission_id = None
+            if export_path is None:
+                export_path = config.settings.EXPORT_PATH
+                if os.path.exists(os.path.join(export_path, self._key)):
+                    self._local_path = os.path.join(export_path, self._key)
+            else:
+                self._local_path = export_path
+            self._info = {
+                'type': 'Submission',
+                'key': self._key,
+                'groups': self._groups,
+                'students': self._students,
+                'local_path': self._local_path,
+                'submission_id': self._submission_id
+            }
         else:
-            self._local_path = export_path
+            self._info = info
+            self._key = info.get('key')
+            self._groups = info.get('groups')
+            self._students = info.get('students')
+            self._local_path = info.get('local_path')
+            self._submission_id = info.get('submission_id')
+
+    def get_info(self):
+        return self._info
+
+    def set_info(self, info: dict):
+        self._info = info
 
     def add_info(self, key, value):
         self._info[key] = value
@@ -36,7 +63,7 @@ class Submission:
     def set_local_path(self, local_path):
         self._local_path = local_path
 
-    def load(self, path: str, extract: bool = False, exist_ok: bool = False, remove_existing: bool = False):
+    def import_submission(self, path: str, extract: bool = False, exist_ok: bool = False, remove_existing: bool = False):
         if not os.path.exists(path):
             raise FileNotFoundError(path)
         if os.path.exists(path) and remove_existing:
@@ -64,19 +91,33 @@ class Submission:
 
     def export(self, output_folder: str, exist_ok: bool = False, remove_existing: bool = False):
         if os.path.exists(output_folder) and remove_existing:
-            os.remove(output_folder)
+            shutil.rmtree(output_folder)
 
-        os.makedirs(self._local_path, exist_ok=exist_ok)
+        os.makedirs(output_folder, exist_ok=exist_ok)
 
-        shutil.copy2(output_folder, self._local_path)
+        shutil.copytree(self._local_path, output_folder, dirs_exist_ok=True)
 
 class SubmissionSet:
     def __init__(self, export_path: str = None):
         self._submissions: dict[str, Submission] = {}
         self._export_path = export_path
+        self._info = {
+            'base': export_path,
+            'type': 'SubmissionSet',
+            'submissions': dict()
+        }
 
     def __getitem__(self, index):
         return self._submissions[list(self._submissions.keys())[index]]
+
+    def __len__(self):
+        return len(self._submissions)
+
+    def get_info(self):
+        return self._info
+
+    def set_info(self, info: dict):
+        self._info = info
 
     def get_submission_list(self, base_path: str) -> list[str]:
         """
@@ -102,21 +143,70 @@ class SubmissionSet:
         text = text.replace('I' + chr(0x301), "Í");
         text = text.replace('O' + chr(0x301), "Ó");
         text = text.replace('U' + chr(0x301), "Ú");
+        text = text.replace('A' + chr(0x308), "Ä");
+        text = text.replace('E' + chr(0x308), "Ë");
+        text = text.replace('I' + chr(0x308), "Ë");
+        text = text.replace('O' + chr(0x308), "Ë");
+        text = text.replace('U' + chr(0x308), "Ü");
+        text = text.replace('N' + chr(0x303), "Ñ");
         return text
 
-    def load_submissions(self, base: str, range_min: int = 1, range_max: int = 25, extract: bool = True, exist_ok: bool = False, remove_existing: bool = False):
+    def import_submissions(self, base: str, range_min: int = None, range_max: int = None, extract: bool = True, exist_ok: bool = False, remove_existing: bool = False):
+        self._info = {
+            'base': base,
+            'type': 'SubmissionSet',
+            'submissions': dict()
+        }
+        if range_min is not None and range_max is not None and range_max < range_min:
+            raise ValueError('Range min must be smaller than range max')
         idx = 0
         for s in self.get_submission_list(base):
             idx += 1
             # Skip submissions not in range
-            if idx < range_min:
+            if range_min is not None and idx < range_min:
                 continue
-            if idx > range_max:
+            if range_max is not None and idx > range_max:
                 break
             # Create submission
             submission = self.create_submission(os.path.join(self._export_path, self.clean_filename(s)), extract)
             self._submissions[submission.get_key()] = submission
-            submission.load(os.path.join(base, s), extract=extract, exist_ok=exist_ok, remove_existing=remove_existing)
+            try:
+                submission.import_submission(os.path.join(base, s), extract=extract, exist_ok=exist_ok, remove_existing=remove_existing)
+            except Exception as e:
+                submission.valid = False
+                submission.error = str(e)
+                logger.warning(f'Invalid submission {submission.get_key()}. Error: {str(e)}.')
+            self._info['submissions'][submission.get_key()] = submission.get_info()
+
+        self._save_data()
+
+    def _save_data(self):
+        with open(os.path.join(self._export_path, 'set_info.pkl'), 'wb') as f:
+            pickle.dump(self._info, f)
+
+    def add_submission(self, submission: Submission):
+        self._submissions[submission.get_key()] = submission
+        self._info['submissions'][submission.get_key()] = submission.get_info()
+
+    @staticmethod
+    def _load_data(path: str) -> dict:
+        with open(os.path.join(path, 'set_info.pkl'), 'rb') as f:
+            data = pickle.load(f)
+        return data
+
+    @staticmethod
+    def load_submissions(path: str):
+        info = SubmissionSet._load_data(path)
+        submission_set = globals()[info['type']]()
+        submission_set.set_info(info)
+
+        for sub_key in info['submissions']:
+            sub_info = info['submissions'][sub_key]
+            submission = globals()[sub_info['type']](info=sub_info)
+            submission.set_info(sub_info)
+            submission_set.add_submission(submission)
+
+        return submission_set
 
     def create_submission(self, path: str, extract: bool = True) -> Submission:
         key = path.split('/')[-1]
@@ -129,11 +219,24 @@ class SubmissionSet:
         return self._submissions
 
     def exportGroup(self, group: str, output_folder: str, exist_ok: bool = False, remove_existing: bool = False):
-        SubmissionSet filtered_submissions = SubmissionSet(os.path.join(self._export_path, self.clean_filename(group)))
-
+        new_submission_set = globals()[self._info['type']](output_folder)
+        new_submission_set.set_info(self._info)
+        new_submission_set._info['submissions'] = dict[str, Submission]()
+        new_submission_set._groups = [group]
+        new_submission_set._students = dict()
         for key, submission in self._submissions.items():
-            pass
+            if group in submission._groups:
+                out_submission_folder = os.path.join(output_folder, submission.get_key())
+                submission.export(out_submission_folder, exist_ok=exist_ok, remove_existing=remove_existing)
+                new_submission = globals()[submission.__class__.__name__](info=submission.get_info())
+                new_submission._info['local_path'] = out_submission_folder
+                new_submission_set.add_submission(new_submission)
+                new_submission_set._students[submission._student_fullname] = self._students[submission._student_fullname]
 
+        new_submission_set._export_path = output_folder
+        new_submission_set._save_data()
+
+        return new_submission_set
 
 
 class MoodleSubmissionSet(SubmissionSet):
@@ -144,9 +247,20 @@ class MoodleSubmissionSet(SubmissionSet):
         self._students = {}
         self._groups = set([])
 
-    def load_submissions(self, base: str, range_min: int = 1, range_max: int = 25, extract: bool = True, exist_ok: bool = False, remove_existing: bool = False):
+    def _save_data(self):
+        self._info['type'] = 'MoodleSubmissionSet'
+        self._info['students'] = self._students
+        self._info['groups'] = self._groups
+        super()._save_data()
 
-        super().load_submissions(base, range_min, range_max, extract, exist_ok, remove_existing)
+    def set_info(self, info: dict):
+        super().set_info(info)
+        self._students = info['students']
+        self._groups = info['groups']
+
+    def import_submissions(self, base: str, range_min: int = None, range_max: int = None, extract: bool = True, exist_ok: bool = False, remove_existing: bool = False):
+
+        super().import_submissions(base, range_min, range_max, extract, exist_ok, remove_existing)
 
         if self._class_csv is not None:
             students_csv = reader(open(self._class_csv, 'r'), delimiter=',')
@@ -160,9 +274,9 @@ class MoodleSubmissionSet(SubmissionSet):
                     'name': row[0].strip(),
                     'surname': row[1].strip(),
                     'id': row[2],
-                    'groups': row[3].split(',')
+                    'groups': [g.strip() for g in row[3].split(',') if len(g) > 0]
                 }
-                self._groups = self._groups.union(set(row[3].split(',')))
+                self._groups = self._groups.union(set([g.strip() for g in row[3].split(',') if len(g) > 0]))
 
             new_submissions = {}
             for sub_key in self._submissions:
@@ -184,20 +298,45 @@ class MoodleSubmissionSet(SubmissionSet):
                 new_submission = MoodleSubmission(sub_key, self._submissions[sub_key].get_local_path())
                 new_submission.set_data(submission_id, student_id, name, surname, fullname, groups)
                 new_submissions[sub_key] = new_submission
+                self._info['submissions'][sub_key]['type'] = 'MoodleSubmission'
+                self._info['submissions'][sub_key]['student_id'] = student_id
+                self._info['submissions'][sub_key]['submission_id'] = submission_id
+                self._info['submissions'][sub_key]['student_fullname'] = fullname
+                self._info['submissions'][sub_key]['student_name'] = name
+                self._info['submissions'][sub_key]['student_surname'] = surname
+                self._info['submissions'][sub_key]['student_groups'] = set(groups)
 
         self._submissions = new_submissions
+        self._save_data()
 
 class MoodleSubmission (Submission):
-    def __init__(self, key: str = None, export_path: str = None):
-        super().__init__(key, export_path)
-        self._submission_id = None
-        self._student_fullname = None
-        self._student_id = None
-        self._student_name = None
-        self._student_surname = None
-        self._student_groups = []
-        self._groups = set([])
+    def __init__(self, key: str = None, export_path: str = None, info: dict = None):
+        super().__init__(key, export_path, info)
         self._info['type'] = 'MoodleSubmission'
+        if info is None:
+            self._submission_id = None
+            self._student_fullname = None
+            self._student_id = None
+            self._student_name = None
+            self._student_surname = None
+            self._student_groups = []
+            self._groups = set([])
+        else:
+            self._submission_id = info['submission_id']
+            if 'student' in info:
+                self._student_fullname = info['student']['full_name']
+                self._student_id = info['student']['id']
+                self._student_name = info['student']['name']
+                self._student_surname = info['student']['surname']
+                self._student_groups = info['student']['groups']
+                self._groups = set(info['student']['groups'])
+            else:
+                self._student_fullname = info.get('student_fullname')
+                self._student_id = info.get('student_id')
+                self._student_name = info.get('student_name')
+                self._student_surname = info.get('student_surname')
+                self._student_groups = info.get('student_groups')
+                self._groups = set(self._student_groups)
 
     def set_data(self, submission_id, student_id, name, surname, full_name, groups = None):
         self._submission_id = submission_id

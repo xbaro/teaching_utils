@@ -11,14 +11,31 @@ if __name__ == '__main__':
 
     print("ED")
 
-    shutil.rmtree('../_data/ed/pr1/out/submissions')
-    submissions = MoodleSubmissionSet('../_data/ed/pr1/courseid_87000_participants.csv', '../_data/ed/pr1/out/submissions')
+    clean_data = False
 
-    submissions.load_submissions('../_data/ed/pr1/lliuraments')
+    # Remove imported data
+    if clean_data:
+        shutil.rmtree('../_data/ed/pr1/out/submissions')
+        print(f'Removed all imported submissions')
 
-    group = 'GrupA'
-    grupA = submissions.exportGroup(group=group, f'../_data/ed/pr1/out/groups/{group}')
+    # Import submissions from Moodle ZIP download
+    out_path = '../_data/ed/pr1/out/submissions'
+    if not os.path.exists(out_path):
+        submissions = MoodleSubmissionSet('../_data/ed/pr1/courseid_87000_participants.csv', '../_data/ed/pr1/out/submissions')
+        submissions.import_submissions('../_data/ed/pr1/lliuraments')
+        print(f'Imported {len(submissions)} submissions')
 
-    print(len(submissions.get_submissions()))
+    # Alternative (Import already extracted submissions)
+    #subs = SubmissionSet.load_submissions('../_data/ed/pr1/out/submissions')
+
+    # Export submissions of a particular group
+    group = 'GrupB'
+    if not os.path.exists(f'../_data/ed/pr1/out/groups/{group}'):
+        grupB = submissions.exportGroup(group=group, output_folder=f'../_data/ed/pr1/out/groups/{group}', exist_ok=True, remove_existing=True)
+        print(f'Exported {len(grupB)} submissions for group {group}')
+
+    # Grup B
+    subs = SubmissionSet.load_submissions('../_data/ed/pr1/out/groups/GrupB')
+    print("Num lliuraments:", len(subs))
 
 
