@@ -3232,5 +3232,5 @@ nb = ["ipython", "jupyterlab", "nbclient"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.10,<=3.12"
-content-hash = "4fc9968ca4befa83e41c3f8504643d16cf9d33f3ffb2da9b8729e825cbd21bc8"
+python-versions = ">=3.10,<3.13"
+content-hash = "5e93f99475bf795b6a8dc1ac464b1c49591b64704cc3fa7b52dcc78fd9d10f26"
