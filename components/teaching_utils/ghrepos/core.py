@@ -229,9 +229,9 @@ def get_repository_stats(repo: Repository):  # noqa: C901
         'workflows': {}
     }
 
+    logs = None
     for wr in repo.get_workflow_runs():
         logs_req = requests.get(wr.logs_url, headers=wr.raw_headers)
-        logs = None
         if logs_req.status_code == 200:
             logs = logs_req.content
 

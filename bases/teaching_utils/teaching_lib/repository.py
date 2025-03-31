@@ -14,7 +14,7 @@ class CodeRepository(Submission):
         else:
             name = repository
             self._repository = ghrepos.get_repository(repository)
-        super().__init__(name=name, export_path=export_path)
+        super().__init__(key=name, export_path=export_path)
 
     def clone(self, export_path: str = None, force: bool = False):
         self._local_path = ghrepos.clone_repository(self._repository, export_path, force)
