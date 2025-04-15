@@ -131,6 +131,9 @@ class SubmissionSet:
 
         return submissions
 
+    def build_key(self, text: str):
+        return self.clean_filename(text).replace("'", "")
+
     def clean_filename(self, text: str) -> str:
         # Fix double encoding problem on filenames
         text = text.replace('A' + chr(0x300), "À");
@@ -209,7 +212,7 @@ class SubmissionSet:
         return submission_set
 
     def create_submission(self, path: str, extract: bool = True) -> Submission:
-        key = path.split('/')[-1]
+        key = self.build_key(path.split('/')[-1])
 
         submission = Submission(key, path)
 
@@ -258,6 +261,9 @@ class MoodleSubmissionSet(SubmissionSet):
         self._students = info['students']
         self._groups = info['groups']
 
+    def get_groups(self):
+        return self._groups
+
     def import_submissions(self, base: str, range_min: int = None, range_max: int = None, extract: bool = True, exist_ok: bool = False, remove_existing: bool = False):
 
         super().import_submissions(base, range_min, range_max, extract, exist_ok, remove_existing)
@@ -269,7 +275,7 @@ class MoodleSubmissionSet(SubmissionSet):
             self._students = {}
             for row in students_csv:
                 full_name = f'{row[1].strip()} {row[0].strip()}'
-                self._students[full_name] = {
+                self._students[self.build_key(full_name)] = {
                     'full_name': full_name,
                     'name': row[0].strip(),
                     'surname': row[1].strip(),

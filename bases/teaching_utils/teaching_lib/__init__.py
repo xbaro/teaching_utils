@@ -3,6 +3,8 @@ from teaching_utils.teaching_lib import (
     repository,
     submissions,
     text_utils,
+    submission_utils,
+    code_tester,
 )
 
 __all__ = [
@@ -10,4 +12,6 @@ __all__ = [
     "repository",
     "submissions",
     "text_utils",
+    "submission_utils",
+    "code_tester",
 ]
