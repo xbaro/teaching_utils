@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
+from docutils.parsers.rst.directives.misc import Class
+
 from teaching_utils import ghrepos, config, testing
 from .submissions import Submission, SubmissionSet
 
@@ -49,6 +51,7 @@ class ExecutionReport:
     test_tree: Optional[TestResultNode] = None
     final_score: Optional[float] = None
     total_tests: Optional[int] = None
+    analysis: str = field(default_factory=str)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 class RunSubmissionTest:
@@ -72,9 +75,20 @@ class RunSubmissionTest:
         self.result_path = config.get("result_path")
         self.grading_file = config.get("grading_file", "results.json")
 
-        self.execution_id = uuid.uuid4().hex
-        self.host_tmp = f"/tmp/submission_{self.execution_id}"
-        self.container_mount = "/mnt/code"
+        self.execution_id = config.get("execution_id", uuid.uuid4().hex)
+        self.host_tmp_basepath = config.get("host_tmp_basepath", "/tmp")
+        self.host_tmp_prefix = config.get("host_tmp_prefix", "submission_")
+        self.host_tmp = config.get("host_tmp", os.path.join(self.host_tmp_basepath, f"{self.host_tmp_prefix}{self.execution_id}", ''))
+        self.container_mount = config.get("container_mount", "/mnt/code")
+
+        self.file_code_extensions = config.get("file_code_extensions", ['.py', '.java', '.c', '.h', '.cpp', '.hpp', '.hcc'])
+        self.line_comment_symbol = config.get("line_comment_symbol", "#")
+
+        self.perform_analysis = config.get("perform_analysis", True)
+        self.analysis_custom_prompt = config.get("analysis_custom_prompt")
+        self.code_extraction_max_char = config.get("code_extraction_max_char", 12000)
+        self.analysis_model = config.get("analysis_model", "codellama")
+
         self.total_tests = 0
 
     def _prepare_environment(self):
@@ -90,6 +104,9 @@ class RunSubmissionTest:
             return self._parse_node(raw)
         except Exception as e:
             return TestResultNode(label="Error parsing results", weight=1.0, passed=False, message=str(e))
+
+    def _collect_additional_metrics(self, result_dir: str, report: ExecutionReport):
+        pass
 
     def _parse_node(self, data: dict) -> TestResultNode:
         node = TestResultNode(
@@ -127,10 +144,14 @@ class RunSubmissionTest:
                 text=True
             )
 
-            tree = self._load_result_tree(results_file_path)
+            try:
+                tree = self._load_result_tree(results_file_path)
+            except FileNotFoundError:
+                # If there are errors doing the tests, the final testing path is not created
+                tree = None
             final_score = tree.calculate_score() if tree else 0.0
 
-            return ExecutionReport(
+            report = ExecutionReport(
                 success=result.returncode == 0,
                 stdout=result.stdout,
                 stderr=result.stderr,
@@ -140,7 +161,16 @@ class RunSubmissionTest:
                 test_tree=tree,
                 final_score=final_score,
                 total_tests=self.total_tests,
+                analysis=None,
             )
+
+            if self.perform_analysis:
+                source_code = self._extract_source_code(self.code_extraction_max_char)
+                report.analysis = self.analyze_code(source_code, self.analysis_model)
+
+            self._collect_additional_metrics(results_file_path, report)
+
+            return report
 
         except subprocess.TimeoutExpired as e:
             return ExecutionReport(
@@ -159,6 +189,62 @@ class RunSubmissionTest:
         report = self._execute_in_container()
         shutil.rmtree(self.host_tmp, ignore_errors=True)
         return report
+
+    def _extract_source_code(self, max_chars: int = 10000):
+        """
+        Extract source code from the given project directory, limited by total character count.
+
+        Args:
+            project_path (str): Root path of the project.
+            max_chars (int): Maximum number of characters to extract.
+            extensions (List[str]): List of file extensions to include.
+
+        Returns:
+            str: Combined source code as a single string, annotated with file paths.
+        """
+        collected_code = []
+        total_chars = 0
+
+        for root, _, files in os.walk(self.submission_path):
+            for file in files:
+                if any(file.endswith(ext) for ext in self.file_code_extensions):
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            code = f.read()
+                            if total_chars + len(code) > max_chars:
+                                continue
+                            collected_code.append(f"\n{self.line_comment_symbol} --- START FILE: {file_path} ---\n{code}\n{self.line_comment_symbol} --- END FILE: {file_path} ---\n")
+                            total_chars += len(code)
+                    except Exception as e:
+                        print(f"Error reading {file_path}: {e}")
+
+        return "\n".join(collected_code)
+
+    def analyze_code(self, code: str, model: str = 'codellama') -> str:
+        """
+        Analyze the given source code using an Ollama language model.
+
+        Args:
+            code (str): The combined source code string.
+            model (str): The Ollama model name to use.
+
+        Returns:
+            str: The analysis result from the LLM.
+        """
+        import ollama
+        if self.analysis_custom_prompt is not None:
+            prompt = self.analysis_custom_prompt
+        else:
+            prompt = (
+                "You are a senior software engineer reviewing a multi-language project.\n"
+                "Please analyze the following source code files. Comment on design, structure, best practices, "
+                "potential improvements, and any technical debt you notice.\n\n"
+                f"{code}"
+            )
+
+        response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
+        return response['message']['content']
 
 class PythonSubmissionTest(RunSubmissionTest):
     def __init__(self, submission_path: str, image: str = "python-grader:latest", max_time: int = 20):
@@ -283,17 +369,21 @@ class JavaSubmissionTest(RunSubmissionTest):
                 "cd $PROJECT_DIR && "
                 "mkdir -p /mnt/code/results && "
                 #"mvn test jacoco:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                "mvn test > /mnt/code/results/maven_output.log 2>&1 && "
+                #"mvn test checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
+                "mvn clean org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent test org.jacoco:jacoco-maven-plugin:0.8.13:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
                 "find . -type d -name surefire-reports | while read dir; do "
                 "  MOD_NAME=$(basename $(dirname $(dirname \"$dir\"))); "
+                "  MOD_PATH=$(dirname $(dirname \"$dir\")); "
                 "  mkdir -p /mnt/code/results/surefire-reports/$MOD_NAME; "
                 "  cp \"$dir\"/*.xml /mnt/code/results/surefire-reports/$MOD_NAME/. 2>/dev/null || true; "
-                "done &&"
-                "find . -name jacoco.xml -exec cp --parents {} /mnt/code/results/ \\; && "
-                "find . -name checkstyle-result.xml -exec cp --parents {} /mnt/code/results/ \\;"
+                "  find \"$MOD_PATH\" -name jacoco.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ; "
+                "  find \"$MOD_PATH\" -name checkstyle-result.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ;"
+                "done"
             ),
             "result_path": "/mnt/code/results",
-            "grading_file": None
+            "grading_file": None,
+            "file_code_extensions": ['.java',],
+            "line_comment_symbol": "//"
         })
         self.total_tests = 0
 
@@ -358,32 +448,73 @@ class JavaSubmissionTest(RunSubmissionTest):
         return self.total_tests
 
     def _collect_additional_metrics(self, result_dir: str, report: ExecutionReport):
-        # Jacoco Code Coverage
-        jacoco_path = self._find_first(result_dir, "jacoco.xml")
-        if jacoco_path:
-            try:
-                tree = ET.parse(jacoco_path)
-                counter = tree.find(".//counter[@type='INSTRUCTION']")
-                covered = int(counter.attrib["covered"])
-                missed = int(counter.attrib["missed"])
-                total = covered + missed
-                coverage = 100.0 * covered / total if total > 0 else 0.0
-                report.metadata["coverage_percent"] = round(coverage, 2)
-            except Exception as e:
-                report.metadata["coverage_error"] = str(e)
+        report.metadata['coverage'] = {}
+        report.metadata['checkstyle'] = {}
+        for module_dir in os.listdir(os.path.join(result_dir, "surefire-reports")):
+            # Jacoco Code Coverage
+            jacoco_path = self._find_first(result_dir, "jacoco.xml")
+            if jacoco_path:
+                try:
+                    tree = ET.parse(jacoco_path)
+                    counter = tree.find(".//counter[@type='INSTRUCTION']")
+                    covered = int(counter.attrib["covered"])
+                    missed = int(counter.attrib["missed"])
+                    total = covered + missed
+                    coverage = 100.0 * covered / total if total > 0 else 0.0
+                    report.metadata["coverage"][module_dir] = {
+                        "coverage_percent": round(coverage, 2),
+                        "coverage_error": None
+                    }
+                except Exception as e:
+                    report.metadata["coverage"][module_dir] = {
+                        "coverage_percent": None,
+                        "coverage_error": str(e)
+                    }
 
-        # Checkstyle Report
-        checkstyle_path = self._find_first(result_dir, "checkstyle-result.xml")
-        if checkstyle_path:
-            try:
-                tree = ET.parse(checkstyle_path)
-                violations = len(tree.findall(".//error"))
-                report.metadata["checkstyle_violations"] = violations
-            except Exception as e:
-                report.metadata["checkstyle_error"] = str(e)
+            # Checkstyle Report
+            checkstyle_path = self._find_first(result_dir, "checkstyle-result.xml")
+            if checkstyle_path:
+                try:
+                    tree = ET.parse(checkstyle_path)
+                    violations = len(tree.findall(".//error"))
+                    report.metadata["checkstyle"][module_dir] = {
+                        "checkstyle_violations": violations,
+                        "checkstyle_error": None
+                    }
+                except Exception as e:
+                    report.metadata["checkstyle"][module_dir] = {
+                        "checkstyle_violations": None,
+                        "checkstyle_error": str(e)
+                    }
 
     def _find_first(self, base_path: str, filename: str) -> str | None:
         for root, dirs, files in os.walk(base_path):
             if filename in files:
                 return os.path.join(root, filename)
         return None
+
+
+class CodeActivityTester:
+    def __init__(self, submissions: SubmissionSet, tester_class: str, options: Optional[dict] = None):
+        self._submissions = submissions
+        self._options = options
+        self._tester_class = CodeActivityTester._get_class(tester_class)
+
+    @staticmethod
+    def _get_class(class_name: str) -> type:
+        parts = class_name.split('.')
+        module = ".".join(parts[:-1])
+        m = __import__(module)
+        for comp in parts[1:]:
+            m = getattr(m, comp)
+        return m
+
+    def run_tests(self):
+        self._reports = {}
+        for submission in self._submissions:
+            sub_test = self._tester_class(submission.get_local_path())
+            self._reports[submission.get_key()] = sub_test.run()
+
+    def export_results(self):
+        for result in self._reports.values():
+            print("")

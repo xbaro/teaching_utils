@@ -74,28 +74,33 @@ if __name__ == '__main__':
     print("Num lliuraments:", len(subs_C))
 """
     # Exporta tots els lliuraments i els separa per grups
-    teaching_lib.submission_utils.export_groups(
-        '../_data/sd/pr1/lliuraments',
-        '../_data/sd/pr1/courseid_87020_participants.csv',
-        '../_data/sd/pr1/out',
-        remove_existing=False,
-        groups=['B', 'C'],
-    )
+    #teaching_lib.submission_utils.export_groups(
+    #    '../_data/sd/pr1/lliuraments',
+    #    '../_data/sd/pr1/courseid_87020_participants.csv',
+    #    '../_data/sd/pr1/out',
+    #    remove_existing=False,
+    #    groups=['B', 'C'],
+    #)
 
-    config = {
-        "image": "maven:latest",
-        "max_time": 30,
-        "run_cmd": "cd /mnt/code && ./run_tests.sh",
-        "result_path": "/mnt/code/results",
-        "grading_file": "results.json"
-    }
+    #config = {
+    #    "image": "maven:latest",
+    #    "max_time": 30,
+    #    "run_cmd": "cd /mnt/code && ./run_tests.sh",
+    #    "result_path": "/mnt/code/results",
+    #    "grading_file": "results.json"
+    #}
 
-    subs_C = SubmissionSet.load_submissions('../_data/sd/pr1/out/groups/C')
-    submission = subs_C[0]
+    #subs_C = SubmissionSet.load_submissions('../_data/sd/pr1/out/groups/C')
+    #submission = subs_C[0]
 
-    java_runner = teaching_lib.code_tester.JavaSubmissionTest(submission.get_local_path())
-    report = java_runner.run()
+    #java_runner = teaching_lib.code_tester.JavaSubmissionTest(submission.get_local_path())
+    #report = java_runner.run()
 
-    print(f"Final Score: {report.final_score:.2f}")
-    print(f"Tree Root: {report.test_tree.label}")
-    print(f"Num Tests: {report.total_tests}")
+    #print(f"Final Score: {report.final_score:.2f}")
+    #print(f"Tree Root: {report.test_tree.label}")
+    #print(f"Num Tests: {report.total_tests}")
+
+    submissions = SubmissionSet.load_submissions('../_data/sd/pr1/out/groups/C')
+    tester = teaching_lib.code_tester.CodeActivityTester(submissions, 'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest')
+    tester.run_tests()
+    tester.export_results()
