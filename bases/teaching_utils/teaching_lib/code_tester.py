@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import subprocess
@@ -8,10 +9,13 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
+from debugpy.common.log import reraise_exception
 from docutils.parsers.rst.directives.misc import Class
 
 from teaching_utils import ghrepos, config, testing
 from .submissions import Submission, SubmissionSet
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TestResultNode:
@@ -51,8 +55,9 @@ class ExecutionReport:
     test_tree: Optional[TestResultNode] = None
     final_score: Optional[float] = None
     total_tests: Optional[int] = None
-    analysis: str = field(default_factory=str)
+    analysis: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    submission: Optional[Submission] = None
 
 class RunSubmissionTest:
     def __init__(self, submission_path: str, config: dict):
@@ -72,6 +77,8 @@ class RunSubmissionTest:
         self.image = config.get("image")
         self.max_time = config.get("max_time", 10)
         self.run_cmd = config.get("run_cmd")
+        self.additional_mounts = config.get("additional_mounts", [])
+
         self.result_path = config.get("result_path")
         self.grading_file = config.get("grading_file", "results.json")
 
@@ -131,9 +138,14 @@ class RunSubmissionTest:
             "docker", "run", "--rm",
             "-v", f"{host_code_path}:{self.container_mount}",
             "-w", self.container_mount,
+        ]
+
+        for additional_mount in self.additional_mounts:
+            docker_cmd.extend(["-v", additional_mount])
+        docker_cmd.extend([
             self.image,
             "bash", "-c", self.run_cmd
-        ]
+        ])
 
         try:
             result = subprocess.run(
@@ -364,7 +376,7 @@ class JavaSubmissionTest(RunSubmissionTest):
             "image": image,
             "max_time": max_time,
             "run_cmd": (
-                "PROJECTS=($(find . -name pom.xml -printf \"%d %p\n\" | sort -n | perl -pe 's/^\d+\s//;' | xargs dirname)) &&"
+                "PROJECTS=($(find . -name pom.xml -printf \"%d %p\n\" | sort -n | perl -pe 's/^\d+\s//;' | xargs dirname)) && "
                 "PROJECT_DIR=${PROJECTS[0]} && "
                 "cd $PROJECT_DIR && "
                 "mkdir -p /mnt/code/results && "
@@ -383,8 +395,10 @@ class JavaSubmissionTest(RunSubmissionTest):
             "result_path": "/mnt/code/results",
             "grading_file": None,
             "file_code_extensions": ['.java',],
-            "line_comment_symbol": "//"
+            "line_comment_symbol": "//",
+            "additional_mounts": ["/tmp/maven_cache:/root/.m2/repository"]
         })
+        os.makedirs('/tmp/maven_cache', exist_ok=True)
         self.total_tests = 0
 
     def _load_result_tree(self, result_path: str) -> TestResultNode:
@@ -450,6 +464,9 @@ class JavaSubmissionTest(RunSubmissionTest):
     def _collect_additional_metrics(self, result_dir: str, report: ExecutionReport):
         report.metadata['coverage'] = {}
         report.metadata['checkstyle'] = {}
+        if not os.path.exists(os.path.join(result_dir, "surefire-reports")):
+            return
+
         for module_dir in os.listdir(os.path.join(result_dir, "surefire-reports")):
             # Jacoco Code Coverage
             jacoco_path = self._find_first(result_dir, "jacoco.xml")
@@ -511,10 +528,22 @@ class CodeActivityTester:
 
     def run_tests(self):
         self._reports = {}
+        i = 0
         for submission in self._submissions:
-            sub_test = self._tester_class(submission.get_local_path())
-            self._reports[submission.get_key()] = sub_test.run()
+            i+=1
+            if i > 2:
+                break
+            try:
+                sub_test = self._tester_class(submission.get_local_path())
+                report = sub_test.run()
+                report.submission = submission
+            except Exception as e:
+                logger.error(e)
+                reraise_exception(e)
+                report = ExecutionReport(success=False, stderr=str(e))
 
-    def export_results(self):
+            self._reports[submission.get_key()] = report
+
+    def export_results(self, remove_groups: list[str] = fac):
         for result in self._reports.values():
-            print("")
+            print(f"{result.submission.get_key()} => {result.success}" )
