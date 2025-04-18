@@ -544,6 +544,8 @@ class CodeActivityTester:
 
             self._reports[submission.get_key()] = report
 
-    def export_results(self, remove_groups: list[str] = fac):
+    def export_results(self, remove_groups: list[str] = None, format: str = 'csv'):
+        if remove_groups is None:
+            remove_groups = []
         for result in self._reports.values():
             print(f"{result.submission.get_key()} => {result.success}" )
