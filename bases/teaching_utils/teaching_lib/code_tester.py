@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
-from debugpy.common.log import reraise_exception
 from docutils.parsers.rst.directives.misc import Class
 
 from teaching_utils import ghrepos, config, testing
@@ -539,7 +538,6 @@ class CodeActivityTester:
                 report.submission = submission
             except Exception as e:
                 logger.error(e)
-                reraise_exception(e)
                 report = ExecutionReport(success=False, stderr=str(e))
 
             self._reports[submission.get_key()] = report
