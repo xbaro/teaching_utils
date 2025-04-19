@@ -101,6 +101,18 @@ if __name__ == '__main__':
     #print(f"Num Tests: {report.total_tests}")
 
     submissions = SubmissionSet.load_submissions('../_data/sd/pr1/out/groups/C')
-    tester = teaching_lib.code_tester.CodeActivityTester(submissions, 'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest')
+    tester = teaching_lib.code_tester.CodeActivityTester(
+        submissions,
+        'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest',
+        options={
+            "max_time": 30,
+            "perform_analysis": False,
+            "code_extraction_max_char": -1,
+        },
+    )
     tester.run_tests()
-    tester.export_results()
+    tester.export_results('../_data/sd/pr1/out/report.csv',
+                          override=True,
+                          format='csv',
+                          remove_groups=['2024_364312_Q2_T1']
+                          )

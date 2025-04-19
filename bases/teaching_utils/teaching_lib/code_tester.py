@@ -7,12 +7,13 @@ import json
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Optional, Any
+from typing import Optional, Any, TextIO
 
 from docutils.parsers.rst.directives.misc import Class
 
 from teaching_utils import ghrepos, config, testing
 from .submissions import Submission, SubmissionSet
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,18 @@ class TestResultNode:
             "children": [child.to_dict() for child in self.children] if self.children else []
         }
 
+    def clone(self):
+        return TestResultNode(
+            label=self.label,
+            passed=self.passed,
+            weight=self.weight,
+            message=self.message,
+            children=[child.clone() for child in self.children],
+            score=self.score
+        )
+
+
+
 @dataclass
 class ExecutionReport:
     success: bool
@@ -57,6 +70,35 @@ class ExecutionReport:
     analysis: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     submission: Optional[Submission] = None
+
+    def clone(self):
+        return ExecutionReport(
+            success=self.success,
+            stdout=self.stdout,
+            stderr=self.stderr,
+            return_code=self.return_code,
+            timeout=self.timeout,
+            results_path=self.results_path,
+            test_tree=self.test_tree.clone() if self.test_tree else None,
+            final_score=self.final_score,
+            total_tests=self.total_tests,
+            analysis=self.analysis,
+            metadata=self.metadata.copy(),
+        )
+    def to_dict(self) -> dict:
+        return {
+            "success": self.success,
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "return_code": self.return_code,
+            "timeout": self.timeout,
+            "results_path": self.results_path,
+            "test_tree": self.test_tree.to_dict() if self.test_tree else None,
+            "final_score": round(self.final_score, 2) if self.final_score is not None else None,
+            "total_tests": self.total_tests,
+            "analysis": self.analysis,
+            "metadata": self.metadata
+        }
 
 class RunSubmissionTest:
     def __init__(self, submission_path: str, config: dict):
@@ -223,7 +265,8 @@ class RunSubmissionTest:
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                             code = f.read()
-                            if total_chars + len(code) > max_chars:
+                            # Limit the total number of characters
+                            if max_chars is not None and max_chars > 0 and total_chars + len(code) > max_chars:
                                 continue
                             collected_code.append(f"\n{self.line_comment_symbol} --- START FILE: {file_path} ---\n{code}\n{self.line_comment_symbol} --- END FILE: {file_path} ---\n")
                             total_chars += len(code)
@@ -247,13 +290,24 @@ class RunSubmissionTest:
         if self.analysis_custom_prompt is not None:
             prompt = self.analysis_custom_prompt
         else:
-            prompt = (
+            """prompt = (
                 "You are a senior software engineer reviewing a multi-language project.\n"
                 "Please analyze the following source code files. Comment on design, structure, best practices, "
                 "potential improvements, and any technical debt you notice.\n\n"
                 f"{code}"
+            )"""
+            """prompt = (
+                "Ets un professor de programació corregint el codi lliurat per un estudiant.\n"
+                "Analitza amb un llenguatge amable i constructiu aquest codi, tenint en compte criteris de qualitat i bones pràctiques."
+                "Finalment, qualifica amb una nota de 0 a 100 el codi, explicant els criteris seguits. El codi:\n\n"
+                f"{code}"
+            )"""
+            prompt = (
+                "You are a programming teacher correcting the code submitted by a student.\n"
+                "Analyze this code in a friendly and constructive manner, taking into account quality criteria and good practices."
+                "Finally, rate the code with a score from 0 to 100, explaining the criteria followed. The code:\n\n"
+                f"{code}"
             )
-
         response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
         return response['message']['content']
 
@@ -370,33 +424,39 @@ class CSubmissionTest(RunSubmissionTest):
 
 
 class JavaSubmissionTest(RunSubmissionTest):
-    def __init__(self, submission_path: str, image: str = "maven:latest", max_time: int = 30):
-        super().__init__(submission_path, {
-            "image": image,
-            "max_time": max_time,
-            "run_cmd": (
-                "PROJECTS=($(find . -name pom.xml -printf \"%d %p\n\" | sort -n | perl -pe 's/^\d+\s//;' | xargs dirname)) && "
-                "PROJECT_DIR=${PROJECTS[0]} && "
-                "cd $PROJECT_DIR && "
-                "mkdir -p /mnt/code/results && "
-                #"mvn test jacoco:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                #"mvn test checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                "mvn clean org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent test org.jacoco:jacoco-maven-plugin:0.8.13:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                "find . -type d -name surefire-reports | while read dir; do "
-                "  MOD_NAME=$(basename $(dirname $(dirname \"$dir\"))); "
-                "  MOD_PATH=$(dirname $(dirname \"$dir\")); "
-                "  mkdir -p /mnt/code/results/surefire-reports/$MOD_NAME; "
-                "  cp \"$dir\"/*.xml /mnt/code/results/surefire-reports/$MOD_NAME/. 2>/dev/null || true; "
-                "  find \"$MOD_PATH\" -name jacoco.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ; "
-                "  find \"$MOD_PATH\" -name checkstyle-result.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ;"
-                "done"
-            ),
-            "result_path": "/mnt/code/results",
-            "grading_file": None,
-            "file_code_extensions": ['.java',],
-            "line_comment_symbol": "//",
-            "additional_mounts": ["/tmp/maven_cache:/root/.m2/repository"]
-        })
+    def __init__(self, submission_path: str, image: str = "maven:latest", max_time: int = 30,
+                 config: Optional[dict] = None):
+        if config is None:
+            config = {}
+        config.update(
+            {
+                "image": image,
+                "max_time": max_time,
+                "run_cmd": (
+                    "PROJECTS=($(find . -name pom.xml -printf \"%d %p\n\" | sort -n | perl -pe 's/^\d+\s//;' | xargs dirname)) && "
+                    "PROJECT_DIR=${PROJECTS[0]} && "
+                    "cd $PROJECT_DIR && "
+                    "mkdir -p /mnt/code/results && "
+                    # "mvn test jacoco:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
+                    # "mvn test checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
+                    "mvn clean org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent test org.jacoco:jacoco-maven-plugin:0.8.13:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
+                    "find . -type d -name surefire-reports | while read dir; do "
+                    "  MOD_NAME=$(basename $(dirname $(dirname \"$dir\"))); "
+                    "  MOD_PATH=$(dirname $(dirname \"$dir\")); "
+                    "  mkdir -p /mnt/code/results/surefire-reports/$MOD_NAME; "
+                    "  cp \"$dir\"/*.xml /mnt/code/results/surefire-reports/$MOD_NAME/. 2>/dev/null || true; "
+                    "  find \"$MOD_PATH\" -name jacoco.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ; "
+                    "  find \"$MOD_PATH\" -name checkstyle-result.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ;"
+                    "done"
+                ),
+                "result_path": "/mnt/code/results",
+                "grading_file": None,
+                "file_code_extensions": ['.java', ],
+                "line_comment_symbol": "//",
+                "additional_mounts": ["/tmp/maven_cache:/root/.m2/repository"]
+            }
+        )
+        super().__init__(submission_path, config)
         os.makedirs('/tmp/maven_cache', exist_ok=True)
         self.total_tests = 0
 
@@ -438,23 +498,29 @@ class JavaSubmissionTest(RunSubmissionTest):
                         ))
 
             # Normalize weights within this module
+            suit_passed = True
             for node in suite_nodes:
                 node.weight = 1.0 / len(suite_nodes) if suite_nodes else 1.0
+                suit_passed = suit_passed and node.passed
 
             if suite_nodes:
                 root.children.append(TestResultNode(
                     label=module_dir,
                     weight=1.0,  # Will normalize later
-                    children=suite_nodes
+                    children=suite_nodes,
+                    passed=suit_passed,
                 ))
                 total_suites += 1
 
         # Normalize top-level module weights
+        root.passed = True
         for child in root.children:
             child.weight = 1.0 / total_suites if total_suites else 1.0
+            root.passed = root.passed and child.passed
 
         root.calculate_score()
         self.total_tests = total_tests
+
         return root
 
     def get_total_tests_executed(self) -> int:
@@ -468,7 +534,7 @@ class JavaSubmissionTest(RunSubmissionTest):
 
         for module_dir in os.listdir(os.path.join(result_dir, "surefire-reports")):
             # Jacoco Code Coverage
-            jacoco_path = self._find_first(result_dir, "jacoco.xml")
+            jacoco_path = self._find_first(os.path.join(result_dir, "surefire-reports", module_dir), "jacoco.xml")
             if jacoco_path:
                 try:
                     tree = ET.parse(jacoco_path)
@@ -478,6 +544,9 @@ class JavaSubmissionTest(RunSubmissionTest):
                     total = covered + missed
                     coverage = 100.0 * covered / total if total > 0 else 0.0
                     report.metadata["coverage"][module_dir] = {
+                        "coverage_covered": covered,
+                        "coverage_missed": missed,
+                        "coverage_total": total,
                         "coverage_percent": round(coverage, 2),
                         "coverage_error": None
                     }
@@ -488,7 +557,7 @@ class JavaSubmissionTest(RunSubmissionTest):
                     }
 
             # Checkstyle Report
-            checkstyle_path = self._find_first(result_dir, "checkstyle-result.xml")
+            checkstyle_path = self._find_first(os.path.join(result_dir, "surefire-reports", module_dir), "checkstyle-result.xml")
             if checkstyle_path:
                 try:
                     tree = ET.parse(checkstyle_path)
@@ -533,17 +602,55 @@ class CodeActivityTester:
             if i > 2:
                 break
             try:
-                sub_test = self._tester_class(submission.get_local_path())
+                sub_test = self._tester_class(submission.get_local_path(), config=self._options)
                 report = sub_test.run()
                 report.submission = submission
             except Exception as e:
                 logger.error(e)
-                report = ExecutionReport(success=False, stderr=str(e))
+                report = ExecutionReport(success=False, stderr=str(e), stdout='', timeout=False)
 
             self._reports[submission.get_key()] = report
 
-    def export_results(self, remove_groups: list[str] = None, format: str = 'csv'):
+    def export_results(self, out_file: str, remove_groups: list[str] = None, format: str = 'csv', override=False):
+        if os.path.exists(out_file) and not override:
+            raise FileExistsError(f"Output file {out_file} already exists. Use override=True to overwrite.")
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
         if remove_groups is None:
             remove_groups = []
-        for result in self._reports.values():
-            print(f"{result.submission.get_key()} => {result.success}" )
+        remove_groups = set(remove_groups)
+        with open(out_file, 'w') as fout:
+            if format == 'csv':
+                fout.write(f"Nom,Cognoms,\"Número ID\",Grups,\"Grups Filtrats\",Qualificació,\"Feedback\"\n")
+            elif format == 'json':
+                fout.write("{\n\"results\": [\n")
+            else:
+                raise NotImplementedError(f"Format {format} not supported")
+            for result in self._reports.values():
+                self._export_row(fout, result, format, remove_groups)
+            if format == 'json':
+                fout.write("]}\n")
+
+    def _export_row(self, fout: TextIO, result: ExecutionReport, format: str, remove_groups: set[str] = None):
+        info = result.submission.get_info()
+        if format == 'csv':
+            fout.write(f"\"{info.get('student_name')}\",\"{info.get('student_surname')}\",{info.get('student_id')},\"{','.join(info.get('student_groups', []))}\"")
+            fout.write(",\"" + ','.join([g for g in info.get('student_groups', []) if g not in remove_groups]) + "\"")
+            fout.write(f",{result.final_score:.2f},\"{self._build_feedback(result)}\"\n")
+        elif format == 'json':
+            res_json = result.to_dict()
+            res_json["score"] = round(res_json["final_score"], 2)
+            res_json["feedback"] = self._build_feedback(result)
+            fout.write(json.dumps(res_json, indent=4))
+        else:
+            raise NotImplementedError
+
+    def _build_feedback(self, report: ExecutionReport) -> str:
+        feedback = []
+        if report.test_tree:
+            feedback.append(f"Test Results: {report.test_tree.label}")
+            for child in report.test_tree.children:
+                feedback.append(f"- {child.label}: {'Passed' if child.passed else 'Failed'}")
+        if report.analysis:
+            feedback.append(f"Code Analysis: {report.analysis}")
+        return "\n".join(feedback).replace("\"", "'")
+

@@ -63,6 +63,9 @@ class Submission:
     def set_local_path(self, local_path):
         self._local_path = local_path
 
+    def get_groups(self):
+        return self._groups
+
     def import_submission(self, path: str, extract: bool = False, exist_ok: bool = False, remove_existing: bool = False):
         if not os.path.exists(path):
             raise FileNotFoundError(path)
@@ -261,13 +264,11 @@ class MoodleSubmissionSet(SubmissionSet):
         self._students = info['students']
         self._groups = info['groups']
 
-    def get_groups(self):
-        return self._groups
-
     def import_submissions(self, base: str, range_min: int = None, range_max: int = None, extract: bool = True, exist_ok: bool = False, remove_existing: bool = False):
 
         super().import_submissions(base, range_min, range_max, extract, exist_ok, remove_existing)
 
+        new_submissions = {}
         if self._class_csv is not None:
             students_csv = reader(open(self._class_csv, 'r'), delimiter=',')
             # Skip headers
@@ -284,7 +285,6 @@ class MoodleSubmissionSet(SubmissionSet):
                 }
                 self._groups = self._groups.union(set([g.strip() for g in row[3].split(',') if len(g) > 0]))
 
-            new_submissions = {}
             for sub_key in self._submissions:
                 key = sub_key.split('/')[-1]
                 fullname = key.split('_')[0]
