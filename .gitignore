@@ -246,3 +246,4 @@ fabric.properties
 
 # Ignore configuration file
 .env
+.DS_Store
