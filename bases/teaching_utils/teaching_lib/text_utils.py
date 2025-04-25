@@ -29,3 +29,20 @@ def fix_double_encoded(s):
         return s
     return DOUBLE_ENCODED.sub(decode_double_encoded, s)
 
+def replace_file_keys(file_path: str, values: dict, start_key: str = '', end_key: str = ''):
+    """
+    Replace all keys in `values` found in the file at `file_path` with their corresponding values.
+    Keys are wrapped with optional `start_key` and `end_key` to allow placeholder formatting.
+    Example: If start_key='{{', end_key='}}', a key 'name' will match '{{name}}'.
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        for key, value in values.items():
+            content = content.replace(f'{start_key}{key}{end_key}', value)
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except Exception as e:
+        print(f"Error processing file {file_path}: {e}")

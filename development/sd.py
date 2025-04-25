@@ -79,7 +79,7 @@ if __name__ == '__main__':
     #    '../_data/sd/pr1/courseid_87020_participants.csv',
     #    '../_data/sd/pr1/out',
     #    remove_existing=False,
-    #    groups=['B', 'C'],
+    #    groups=['B', 'C', 'F'],
     #)
 
     #config = {
@@ -100,7 +100,7 @@ if __name__ == '__main__':
     #print(f"Tree Root: {report.test_tree.label}")
     #print(f"Num Tests: {report.total_tests}")
 
-    submissions = SubmissionSet.load_submissions('../_data/sd/pr1/out/groups/C')
+    submissions = SubmissionSet.load_submissions('../_data/sd/pr1/out/submissions')
     tester = teaching_lib.code_tester.CodeActivityTester(
         submissions,
         'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest',
@@ -110,7 +110,7 @@ if __name__ == '__main__':
             "code_extraction_max_char": -1,
         },
     )
-    tester.run_tests()
+    tester.run_tests(start=0, limit=None, cache_file='../_data/sd/pr1/out/cache_all_groups.pkl')
     tester.export_results('../_data/sd/pr1/out/report.csv',
                           override=True,
                           format='csv',

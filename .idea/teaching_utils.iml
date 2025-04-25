@@ -7,7 +7,7 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/_data" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.11 virtualenv at ~/teaching_utils/.venv" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Poetry (teaching_utils)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>

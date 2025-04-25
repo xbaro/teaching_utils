@@ -1,5 +1,6 @@
 import logging
 import os
+import pickle
 import shutil
 import subprocess
 import uuid
@@ -10,7 +11,9 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, TextIO
 
 from docutils.parsers.rst.directives.misc import Class
+from sphinx.util.docutils import additional_nodes
 
+import teaching_utils.teaching_lib.text_utils
 from teaching_utils import ghrepos, config, testing
 from .submissions import Submission, SubmissionSet
 
@@ -120,6 +123,8 @@ class RunSubmissionTest:
         self.run_cmd = config.get("run_cmd")
         self.additional_mounts = config.get("additional_mounts", [])
 
+        self.data_path = config.get("data_path")
+        self.data_mount = config.get("data_mount", "/mnt/data")
         self.result_path = config.get("result_path")
         self.grading_file = config.get("grading_file", "results.json")
 
@@ -142,6 +147,15 @@ class RunSubmissionTest:
     def _prepare_environment(self):
         os.makedirs(self.host_tmp, exist_ok=True)
         shutil.copytree(self.submission_path, os.path.join(self.host_tmp, "code"), dirs_exist_ok=True)
+
+        # Apply any extra action to the code before execution
+        self._prepare_code_execution()
+
+    def _prepare_code_execution(self):
+        pass
+
+    def _compute_working_directory(self):
+        return None
 
     def _load_result_tree(self, result_file_path: str) -> Optional[TestResultNode]:
         if not os.path.exists(result_file_path):
@@ -175,11 +189,20 @@ class RunSubmissionTest:
         else:
             results_file_path = host_results_path
 
+        work_path = self._compute_working_directory()
+        if work_path is None or len(work_path) == 0:
+            work_path = self.container_mount
+        else:
+            work_path = os.path.join(self.container_mount, os.path.relpath(work_path, host_code_path))
+
         docker_cmd = [
             "docker", "run", "--rm",
             "-v", f"{host_code_path}:{self.container_mount}",
-            "-w", self.container_mount,
+            "-w", work_path,
         ]
+
+        if self.data_path is not None:
+            docker_cmd.extend(["-v", f"{self.data_path}:{self.data_mount}"])
 
         for additional_mount in self.additional_mounts:
             docker_cmd.extend(["-v", additional_mount])
@@ -311,22 +334,34 @@ class RunSubmissionTest:
         response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
         return response['message']['content']
 
+    def _find_first(self, base_path: str, filename: str) -> str | None:
+        for root, dirs, files in os.walk(base_path):
+            if filename in files:
+                return os.path.join(root, filename)
+        return None
+
 class PythonSubmissionTest(RunSubmissionTest):
-    def __init__(self, submission_path: str, image: str = "python-grader:latest", max_time: int = 20):
-        super().__init__(submission_path, {
-            "image": image,
-            "max_time": max_time,
-            "run_cmd": (
-                "cd /mnt/code && "
-                "mkdir -p results && "
-                "pytest --json-report --json-report-file=results/test_report.json > results/pytest.out 2>&1; "
-                "coverage run -m pytest > /dev/null 2>&1; "
-                "coverage json -o results/coverage.json; "
-                "flake8 . --format=json --output-file results/flake8.json"
-            ),
-            "result_path": "/mnt/code/results",
-            "grading_file": "test_report.json"
-        })
+    def __init__(self, submission_path: str, image: str = "python-grader:latest", max_time: int = 30,
+                 config: Optional[dict] = None):
+        if config is None:
+            config = {}
+        config.update(
+             {
+                "image": image,
+                "max_time": max_time,
+                "run_cmd": (
+                    "cd /mnt/code && "
+                    "mkdir -p results && "
+                    "pytest --json-report --json-report-file=results/test_report.json > results/pytest.out 2>&1; "
+                    "coverage run -m pytest > /dev/null 2>&1; "
+                    "coverage json -o results/coverage.json; "
+                    "flake8 . --format=json --output-file results/flake8.json"
+                ),
+                "result_path": "/mnt/code/results",
+                "grading_file": "test_report.json"
+            }
+        )
+        super().__init__(submission_path, config)
 
     def _load_result_tree(self, result_file_path: str) -> TestResultNode:
         results_dir = os.path.dirname(result_file_path)
@@ -379,19 +414,26 @@ class PythonSubmissionTest(RunSubmissionTest):
         return root
 
 class CSubmissionTest(RunSubmissionTest):
-    def __init__(self, submission_path: str, image: str = "cpp-gtest-grader:latest", max_time: int = 20):
-        super().__init__(submission_path, {
-            "image": image,
-            "max_time": max_time,
-            "run_cmd": (
-                "cd /mnt/code && "
-                "mkdir -p build results && "
-                "(cmake . && make || make) > results/build.log 2>&1 && "
-                "./test_suite --gtest_output=json:results/test_report.json > results/test_output.log 2>&1"
-            ),
-            "result_path": "/mnt/code/results",
-            "grading_file": "test_report.json"
-        })
+    def __init__(self, submission_path: str, image: str = "xbaro/gcc-gtest:latest", max_time: int = 30,
+                 config: Optional[dict] = None):
+        if config is None:
+            config = {}
+        config.update(
+             {
+                "image": image,
+                "max_time": max_time,
+                "run_cmd": (
+                    "mkdir -p /mnt/code/results && "
+                    "mkdir -p build && cd build && "
+                    "(cmake .. && make || make) > results/build.log 2>&1 && "
+                    "./test_suite --gtest_output=json:results/test_report.json > results/test_output.log 2>&1"
+                ),
+                "result_path": "/mnt/code/results",
+                "grading_file": "test_report.json",
+            }
+        )
+        super().__init__(submission_path, config)
+        self.total_tests = 0
 
     def _load_result_tree(self, result_file_path: str) -> TestResultNode:
         try:
@@ -421,6 +463,27 @@ class CSubmissionTest(RunSubmissionTest):
 
         root.calculate_score()
         return root
+
+    def _prepare_code_execution(self):
+        # Copy external files if provided
+        base_path = self._compute_working_directory()
+
+        if base_path is not None and self.data_path is not None:
+            shutil.copytree(self.data_path, base_path, dirs_exist_ok=True)
+            dict = {
+                'EX1_PATH': 'Ex1',
+                'EX2_PATH': 'Ex2',
+                'EX3_PATH': 'Ex3'
+            }
+            teaching_utils.teaching_lib.text_utils.replace_file_keys(os.path.join(base_path, 'CMakeLists.txt'), dict, '$!-', '-!$')
+
+    def _compute_working_directory(self):
+        # Locate the first path with a "main.cpp".
+        base_path = self._find_first(os.path.join(self.host_tmp, "code"), 'main.cpp')
+        if base_path is not None:
+            return os.path.dirname(os.path.dirname(base_path))
+
+        return None
 
 
 class JavaSubmissionTest(RunSubmissionTest):
@@ -572,12 +635,6 @@ class JavaSubmissionTest(RunSubmissionTest):
                         "checkstyle_error": str(e)
                     }
 
-    def _find_first(self, base_path: str, filename: str) -> str | None:
-        for root, dirs, files in os.walk(base_path):
-            if filename in files:
-                return os.path.join(root, filename)
-        return None
-
 
 class CodeActivityTester:
     def __init__(self, submissions: SubmissionSet, tester_class: str, options: Optional[dict] = None):
@@ -594,22 +651,41 @@ class CodeActivityTester:
             m = getattr(m, comp)
         return m
 
-    def run_tests(self):
+    def run_tests(self, start: int = 0, limit: int = None, cache_file: str = None ):
+        cache = {}
+        if cache_file is not None and os.path.exists(cache_file):
+            logger.info(f"Loading cached results from {cache_file}")
+            cache = pickle.load(open(cache_file, "rb"))
+
         self._reports = {}
         i = 0
         for submission in self._submissions:
+            if i < start:
+                logger.debug("Skipped submission %d", i)
+                continue
             i+=1
-            if i > 2:
+            if limit is not None and i > limit:
+                logger.debug("Breaking test at submission %d", i)
                 break
-            try:
-                sub_test = self._tester_class(submission.get_local_path(), config=self._options)
-                report = sub_test.run()
-                report.submission = submission
-            except Exception as e:
-                logger.error(e)
-                report = ExecutionReport(success=False, stderr=str(e), stdout='', timeout=False)
+            if submission.get_key() in cache:
+                logger.info(f"Found cached result for submission {submission.get_key()}")
+                report = cache[submission.get_key()]
+            else:
+                try:
+                    sub_test = self._tester_class(submission.get_local_path(), config=self._options)
+                    report = sub_test.run()
+                    report.submission = submission
+                except Exception as e:
+                    logger.error(e)
+                    report = ExecutionReport(return_code=-1, results_path=None, success=False, stderr=str(e), stdout='', timeout=False)
+                cache[submission.get_key()] = report
+                if cache_file is not None:
+                    with open(cache_file, "wb") as f:
+                        pickle.dump(cache, f)
 
             self._reports[submission.get_key()] = report
+            logger.info("Submission %s: %s", submission.get_key(), str(report))
+
 
     def export_results(self, out_file: str, remove_groups: list[str] = None, format: str = 'csv', override=False):
         if os.path.exists(out_file) and not override:
@@ -631,6 +707,9 @@ class CodeActivityTester:
                 fout.write("]}\n")
 
     def _export_row(self, fout: TextIO, result: ExecutionReport, format: str, remove_groups: set[str] = None):
+        if result.submission is None:
+            logger.error("Submission result not available. Row skipped.")
+            return
         info = result.submission.get_info()
         if format == 'csv':
             fout.write(f"\"{info.get('student_name')}\",\"{info.get('student_surname')}\",{info.get('student_id')},\"{','.join(info.get('student_groups', []))}\"")
@@ -648,8 +727,9 @@ class CodeActivityTester:
         feedback = []
         if report.test_tree:
             feedback.append(f"Test Results: {report.test_tree.label}")
+            feedback.append(f"  => {report.total_tests} tests found.")
             for child in report.test_tree.children:
-                feedback.append(f"- {child.label}: {'Passed' if child.passed else 'Failed'}")
+                feedback.append(f"    - {child.label}: {'Passed' if child.passed else 'Failed'}")
         if report.analysis:
             feedback.append(f"Code Analysis: {report.analysis}")
         return "\n".join(feedback).replace("\"", "'")
