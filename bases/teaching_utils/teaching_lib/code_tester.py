@@ -512,7 +512,8 @@ class CSubmissionTest(RunSubmissionTest):
             dict = {
                 'EX1_PATH': 'Ex1',
                 'EX2_PATH': 'Ex2',
-                'EX3_PATH': 'Ex3'
+                'EX3_PATH': 'Ex3',
+                'RESULT_PATH': self.result_path,
             }
             for module in modules:
                 if '1' in module:
