@@ -135,7 +135,7 @@ class SubmissionSet:
         return submissions
 
     def build_key(self, text: str):
-        return self.clean_filename(text).replace("'", "")
+        return self.clean_filename(text).replace("'", "").replace('\\', '/')
 
     def clean_filename(self, text: str) -> str:
         # Fix double encoding problem on filenames
@@ -270,7 +270,7 @@ class MoodleSubmissionSet(SubmissionSet):
 
         new_submissions = {}
         if self._class_csv is not None:
-            students_csv = reader(open(self._class_csv, 'r'), delimiter=',')
+            students_csv = reader(open(self._class_csv, 'r', encoding='utf-8'), delimiter=',')
             # Skip headers
             next(students_csv, None)
             self._students = {}
@@ -286,7 +286,7 @@ class MoodleSubmissionSet(SubmissionSet):
                 self._groups = self._groups.union(set([g.strip() for g in row[3].split(',') if len(g) > 0]))
 
             for sub_key in self._submissions:
-                key = sub_key.split('/')[-1]
+                key = sub_key.replace('\\', '/').split('/')[-1]
                 fullname = key.split('_')[0]
                 submission_id = key.split('_')[1]
                 student_id = None

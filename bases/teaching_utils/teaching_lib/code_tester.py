@@ -126,7 +126,8 @@ class RunSubmissionTest:
         self.data_path = config.get("data_path")
         self.data_mount = config.get("data_mount", "/mnt/data")
         self.result_path = config.get("result_path")
-        self.grading_file = config.get("grading_file", "results.json")
+        self.grading_file = config.get("grading_file")
+        self.remove_tmp = config.get("remove_tmp", True)
 
         self.execution_id = config.get("execution_id", uuid.uuid4().hex)
         self.host_tmp_basepath = config.get("host_tmp_basepath", "/tmp")
@@ -181,8 +182,16 @@ class RunSubmissionTest:
         node.children = [self._parse_node(child) for child in children_data]
         return node
 
+
+    def _fix_path(self, path: str) -> str:
+        if os.name == 'nt':
+            path = path.replace("\\", "/")
+            if path[1:3] == ":/":
+                path = '/' + path[0] + path[2:]
+        return path
+
     def _execute_in_container(self) -> ExecutionReport:
-        host_code_path = os.path.join(self.host_tmp, "code")
+        host_code_path = os.path.abspath(os.path.join(self.host_tmp, "code"))
         host_results_path = os.path.join(host_code_path, os.path.basename(self.result_path))
         if self.grading_file is not None:
             results_file_path = os.path.join(host_results_path, self.grading_file)
@@ -193,16 +202,17 @@ class RunSubmissionTest:
         if work_path is None or len(work_path) == 0:
             work_path = self.container_mount
         else:
-            work_path = os.path.join(self.container_mount, os.path.relpath(work_path, host_code_path))
+            work_path = os.path.join(self.container_mount, os.path.relpath(os.path.abspath(work_path), host_code_path))
+
 
         docker_cmd = [
             "docker", "run", "--rm",
-            "-v", f"{host_code_path}:{self.container_mount}",
-            "-w", work_path,
+            "-w", self._fix_path(work_path),
+            "-v", f"{self._fix_path(host_code_path)}:{self.container_mount}",
         ]
 
         if self.data_path is not None:
-            docker_cmd.extend(["-v", f"{self.data_path}:{self.data_mount}"])
+            docker_cmd.extend(["-v", f"{self._fix_path(os.path.abspath(self.data_path))}:{self.data_mount}"])
 
         for additional_mount in self.additional_mounts:
             docker_cmd.extend(["-v", additional_mount])
@@ -263,7 +273,10 @@ class RunSubmissionTest:
     def run(self) -> ExecutionReport:
         self._prepare_environment()
         report = self._execute_in_container()
-        shutil.rmtree(self.host_tmp, ignore_errors=True)
+        if self.remove_tmp:
+            # Remove the temporary directory after execution
+            logger.debug(f"Removing temporary directory {self.host_tmp}")
+            shutil.rmtree(self.host_tmp, ignore_errors=True)
         return report
 
     def _extract_source_code(self, max_chars: int = 10000):
@@ -417,49 +430,72 @@ class CSubmissionTest(RunSubmissionTest):
     def __init__(self, submission_path: str, image: str = "xbaro/gcc-gtest:latest", max_time: int = 30,
                  config: Optional[dict] = None):
         if config is None:
-            config = {}
+            config = {
+                'max_time': max_time,
+            }
+        elif 'max_time' not in config:
+            config['max_time'] = max_time
         config.update(
              {
                 "image": image,
-                "max_time": max_time,
                 "run_cmd": (
                     "mkdir -p /mnt/code/results && "
                     "mkdir -p build && cd build && "
-                    "(cmake .. && make || make) > results/build.log 2>&1 && "
-                    "./test_suite --gtest_output=json:results/test_report.json > results/test_output.log 2>&1"
+                    "cmake .. > /mnt/code/results/cmake.log 2>&1 && "
+                    "make > /mnt/code/results/build.log 2>&1 && "
+                    "make test > /mnt/code/results/test.log 2>&1 ; "
+                    "cp *.json /mnt/code/results/ > /mnt/code/results/result_copy.log 2>&1 || :"
+                    #"./test_suite --gtest_output=json:results/test_report.json > results/test_output.log 2>&1"
                 ),
                 "result_path": "/mnt/code/results",
-                "grading_file": "test_report.json",
             }
         )
         super().__init__(submission_path, config)
         self.total_tests = 0
 
     def _load_result_tree(self, result_file_path: str) -> TestResultNode:
-        try:
-            with open(result_file_path, "r") as f:
-                raw = json.load(f)
-        except Exception as e:
-            return TestResultNode(label="C Tests", weight=1.0, passed=False, message=str(e))
+        if not os.path.exists(result_file_path):
+            return TestResultNode(label="C Tests", weight=1.0, passed=False, message="No results file found.")
+        # Load JSON files from results directory
+        results = {
+            'Ex1': None,
+            'Ex2': None,
+            'Ex3': None
+        }
+        for module in os.listdir(result_file_path):
+            try:
+                if module.endswith(".json"):
+                    json_result_file_path = json.load(open(os.path.join(result_file_path, module)))
+                    if 'report_ex1' in module:
+                        results['Ex1'] = json_result_file_path
+                    elif 'report_ex2' in module:
+                        results['Ex2'] = json_result_file_path
+                    elif 'report_ex3' in module:
+                        results['Ex3'] = json_result_file_path
+            except Exception as e:
+                return TestResultNode(label="C Tests", weight=1.0, passed=False, message=str(e))
 
         root = TestResultNode(label="C++ Tests", weight=1.0, children=[])
-        test_cases = raw.get("testsuites", {}).get("testsuite", [])
-        if not isinstance(test_cases, list):
-            test_cases = [test_cases]
+        for module, raw in results.items():
+            if raw is None:
+                continue
+            test_cases = raw.get("testsuites", {}).get("testsuite", [])
+            if not isinstance(test_cases, list):
+                test_cases = [test_cases]
 
-        total_tests = sum(int(ts["tests"]) for ts in test_cases)
-        for suite in test_cases:
-            suite_name = suite.get("name", "Unnamed Suite")
-            children = []
-            for case in suite.get("testcase", []):
-                if isinstance(case, dict):
-                    children.append(TestResultNode(
-                        label=case.get("name", "Unnamed Test"),
-                        weight=1.0 / total_tests,
-                        passed="failure" not in case,
-                        message=case.get("failure", {}).get("#text") if isinstance(case.get("failure"), dict) else None
-                    ))
-            root.children.append(TestResultNode(label=suite_name, weight=1.0 / len(test_cases), children=children))
+            total_tests = sum(int(ts["tests"]) for ts in test_cases)
+            for suite in test_cases:
+                suite_name = suite.get("name", module)
+                children = []
+                for case in suite.get("testcase", []):
+                    if isinstance(case, dict):
+                        children.append(TestResultNode(
+                            label=case.get("name", "Unnamed Test"),
+                            weight=1.0 / total_tests,
+                            passed="failure" not in case,
+                            message=case.get("failure", {}).get("#text") if isinstance(case.get("failure"), dict) else None
+                        ))
+                root.children.append(TestResultNode(label=suite_name, weight=1.0 / len(test_cases), children=children))
 
         root.calculate_score()
         return root
@@ -469,12 +505,27 @@ class CSubmissionTest(RunSubmissionTest):
         base_path = self._compute_working_directory()
 
         if base_path is not None and self.data_path is not None:
-            shutil.copytree(self.data_path, base_path, dirs_exist_ok=True)
+            modules = os.listdir(base_path)
+            if len(modules) == 0:
+                logger.error(f"No modules found in base_path: {base_path}")
+                return
             dict = {
                 'EX1_PATH': 'Ex1',
                 'EX2_PATH': 'Ex2',
                 'EX3_PATH': 'Ex3'
             }
+            for module in modules:
+                if '1' in module:
+                    dict['EX1_PATH'] = module
+                    continue
+                if '2' in module:
+                    dict['EX2_PATH'] = module
+                    continue
+                if '3' in module:
+                    dict['EX3_PATH'] = module
+                    continue
+
+            shutil.copytree(self.data_path, base_path, dirs_exist_ok=True)
             teaching_utils.teaching_lib.text_utils.replace_file_keys(os.path.join(base_path, 'CMakeLists.txt'), dict, '$!-', '-!$')
 
     def _compute_working_directory(self):
@@ -662,8 +713,9 @@ class CodeActivityTester:
         for submission in self._submissions:
             if i < start:
                 logger.debug("Skipped submission %d", i)
+                i += 1
                 continue
-            i+=1
+            i += 1
             if limit is not None and i > limit:
                 logger.debug("Breaking test at submission %d", i)
                 break

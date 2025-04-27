@@ -3,3 +3,6 @@
 
 # GitHub application token to access GH repositories.
 GITHUB_TOKEN=
+
+# OPENAI API key to access OpenAI API.
+OPENAI_API_KEY=

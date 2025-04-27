@@ -53,18 +53,22 @@ if __name__ == '__main__':
             groups=['GrupA', 'GrupB', 'GrupC', 'GrupD', 'GrupF'],
         )
 
-        submissions = SubmissionSet.load_submissions('../_data/ed/pr2/out/submissions')
+        #submissions = SubmissionSet.load_submissions('../_data/ed/pr2/out/submissions')
+        submissions = SubmissionSet.load_submissions('../_data/ed/pr2/out/groups/GrupB')
         tester = teaching_lib.code_tester.CodeActivityTester(
             submissions,
             'teaching_utils.teaching_lib.code_tester.CSubmissionTest',
             options={
-                "max_time": 30,
+                "max_time": 240,
                 "perform_analysis": False,
                 "code_extraction_max_char": -1,
                 "data_path": "../_data/ed/pr2/data",
+                "host_tmp_basepath": "../_data/ed/pr2/tmp",
+                "remove_tmp": False,
             },
         )
-        tester.run_tests(start=0, limit=3, cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
+        #tester.run_tests(start=0, limit=3, cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
+        tester.run_tests(start=1, limit=3)
         tester.export_results('../_data/ed/pr2/out/report.csv',
                               override=True,
                               format='csv',
