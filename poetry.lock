@@ -3263,6 +3263,20 @@ socks = ["pysocks (>=1.5.6,!=1.5.7,<2.0)"]
 zstd = ["zstandard (>=0.18.0)"]
 
 [[package]]
+name = "valparse"
+version = "0.2.1"
+description = "Package to parse Valgrind XML files."
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "valparse-0.2.1.tar.gz", hash = "sha256:39d8466d43e931e67bde0dfd57809c2b4c6edb4d8fedaca03813b132c45822c8"},
+]
+
+[package.extras]
+develop = ["black (>=22)", "bump2version (>=1.0.0)", "check-manifest", "flake8 (>=3.7.8)", "flake8-black (>=0.2.1)", "flake8-pyproject", "mypy", "pytest (>=4.3.0)", "pytest-cov (>=2.6.1)", "twine", "wheel"]
+
+[[package]]
 name = "wcwidth"
 version = "0.2.13"
 description = "Measures the displayed width of unicode strings in a terminal"
@@ -3416,4 +3430,4 @@ ollama = ["ollama"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "95f5a7e4784379da72f40b9dd1e1765c2da66b2fc518bb807888b2f80bd40e62"
+content-hash = "c015bd1ebf424dcea500b361ddbcbfae61e32aa1e7be450902482a228494693b"

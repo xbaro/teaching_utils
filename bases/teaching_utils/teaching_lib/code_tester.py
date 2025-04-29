@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import uuid
 import json
+import valparse
 
 import xml.etree.ElementTree as ET
 import teaching_utils.teaching_lib.text_utils
@@ -418,6 +419,44 @@ class CSubmissionTest(RunSubmissionTest):
             return os.path.dirname(os.path.dirname(base_path))
 
         return None
+
+    def _collect_additional_metrics(self, result_dir: str, report: ExecutionReport):
+        report.metadata['memcheck'] = {}
+        if not os.path.exists(result_dir):
+            return
+
+        for mem_file in os.listdir(result_dir):
+            if mem_file.endswith('.xml'):
+                xml_file = valparse.Parser(os.path.join(result_dir, mem_file))
+                report.metadata['memcheck'][mem_file] = {
+                    'has_leaks': xml_file.hasLeaks(),
+                    'has_errors': xml_file.hasErrors(),
+                    'total_bytes_leaked': xml_file.totalBytesLeaked(),
+                    'total_errors': xml_file.errcount,
+                    'total_leaks': xml_file.leakcount,
+                    'errors': [],
+                    'leaks': []
+                }
+                for err in xml_file.errs:
+                    err_json = {
+                        'kind': err.kind.value,
+                        'msg': err.msg,
+                        'msg_secondary': err.msg_secondary,
+                        'blocks_leaked': err.blocks_leaked,
+                        'bytes_leaked': err.bytes_leaked,
+                        'stack': []
+                    }
+                    for stacktrace in err.stack:
+                        err_json['stack'].append({
+                            'dir': stacktrace.dir,
+                            'line': stacktrace.line,
+                            'file': stacktrace.file,
+                            'fn': stacktrace.fn,
+                            'ip': stacktrace.ip,
+                            'obj': stacktrace.obj,
+                        })
+                    report.metadata['memcheck'][mem_file]['errors'].append(err_json)
+
 
 
 class JavaSubmissionTest(RunSubmissionTest):

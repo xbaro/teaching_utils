@@ -71,9 +71,10 @@ if __name__ == '__main__':
                 "remove_tmp": False,
             },
         )
-        tester.run_tests(start=0, limit=3, cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
+        #tester.run_tests(start=0, limit=3, cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
         #tester.run_tests(start=1, limit=3)
         #tester.run_tests()
+        tester.run_tests(cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
         tester.export_results('../_data/ed/pr2/out/report.csv',
                               override=True,
                               format='csv',
