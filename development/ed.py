@@ -7,48 +7,9 @@ from teaching_utils import teaching_lib
 from teaching_utils.teaching_lib.code_tester import TestResultNode
 from teaching_utils.teaching_lib.submissions import SubmissionSet, MoodleSubmissionSet
 
+from teaching_utils.teaching_lib.gtest_utils import load_gtest_results
+
 logger = logging.getLogger(__name__)
-
-
-def parse_gtest_results(testsuite):
-
-    # Get data from current test suite
-    test_results = TestResultNode(
-        label=testsuite.get("name", "Unknown"),
-        weight = 1.0,
-        children = []
-    )
-
-    if 'testsuites' in testsuite:
-        # Iterate over all testsuites
-        for testsuite in testsuite['testsuites']:
-            test_results.children.append(parse_gtest_results(testsuite))
-    elif 'testsuite' in testsuite:
-        # Iterate over all tests
-        for testsuite in testsuite['testsuite']:
-            test_results.children.append(parse_gtest_results(testsuite))
-    else:
-        # Iterate over all tests
-        for test in testsuite['testcase']:
-            test_results.children.append(
-                TestResultNode(
-                    label=test.get("name", "Unknown"),
-                    weight = 1.0,
-                    passed=test.get("status", "Unknown") == "passed",
-                    message=test.get("message", ""),
-                    children=[]
-                )
-            )
-    return test_results
-
-def load_test_results():
-
-    raw = json.load(open('../_data/ed/pr2/tmp/submission_1a7a5ca3ed6446dc8ea9c3880ead849d/code/results/report_ex1.json', 'r'))
-
-    return parse_gtest_results(raw)
-
-
-
 
 if __name__ == '__main__':
 
@@ -58,10 +19,6 @@ if __name__ == '__main__':
 
     pr1 = False
     pr2 = True
-
-
-    #load_test_results()
-
 
     if pr1:
         # Remove imported data
@@ -114,9 +71,9 @@ if __name__ == '__main__':
                 "remove_tmp": False,
             },
         )
-        #tester.run_tests(start=0, limit=3, cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
+        tester.run_tests(start=0, limit=3, cache_file='../_data/ed/pr2/out/cache_all_groups.pkl')
         #tester.run_tests(start=1, limit=3)
-        tester.run_tests()
+        #tester.run_tests()
         tester.export_results('../_data/ed/pr2/out/report.csv',
                               override=True,
                               format='csv',

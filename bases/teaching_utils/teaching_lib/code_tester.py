@@ -7,101 +7,18 @@ import uuid
 import json
 
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
-from typing import Optional, Any, TextIO
-
-from docutils.parsers.rst.directives.misc import Class
-from sphinx.util.docutils import additional_nodes
-
 import teaching_utils.teaching_lib.text_utils
-from teaching_utils import ghrepos, config, testing
-from .submissions import Submission, SubmissionSet
+
+from typing import Optional, Any, TextIO
+from .test_utils import TestResultNode, ExecutionReport
+
+
+from .submissions import SubmissionSet
+from .gtest_utils import load_gtest_results
 
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class TestResultNode:
-    label: str
-    passed: Optional[bool] = None
-    weight: float = 1.0
-    message: Optional[str] = None
-    children: list['TestResultNode'] = field(default_factory=list)
-    score: float = 0.0
-
-    def calculate_score(self) -> float:
-        if self.children:
-            self.score = sum(child.calculate_score() * child.weight for child in self.children)
-            return self.score
-        else:
-            self.score = 1.0 if self.passed else 0.0
-            return self.score
-
-    def to_dict(self) -> dict:
-        return {
-            "label": self.label,
-            "passed": self.passed,
-            "weight": self.weight,
-            "message": self.message,
-            "score": round(self.score, 2),
-            "children": [child.to_dict() for child in self.children] if self.children else []
-        }
-
-    def clone(self):
-        return TestResultNode(
-            label=self.label,
-            passed=self.passed,
-            weight=self.weight,
-            message=self.message,
-            children=[child.clone() for child in self.children],
-            score=self.score
-        )
-
-
-
-@dataclass
-class ExecutionReport:
-    success: bool
-    stdout: str
-    stderr: str
-    return_code: Optional[int]
-    timeout: bool
-    results_path: str
-    test_tree: Optional[TestResultNode] = None
-    final_score: Optional[float] = None
-    total_tests: Optional[int] = None
-    analysis: Optional[str] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    submission: Optional[Submission] = None
-
-    def clone(self):
-        return ExecutionReport(
-            success=self.success,
-            stdout=self.stdout,
-            stderr=self.stderr,
-            return_code=self.return_code,
-            timeout=self.timeout,
-            results_path=self.results_path,
-            test_tree=self.test_tree.clone() if self.test_tree else None,
-            final_score=self.final_score,
-            total_tests=self.total_tests,
-            analysis=self.analysis,
-            metadata=self.metadata.copy(),
-        )
-    def to_dict(self) -> dict:
-        return {
-            "success": self.success,
-            "stdout": self.stdout,
-            "stderr": self.stderr,
-            "return_code": self.return_code,
-            "timeout": self.timeout,
-            "results_path": self.results_path,
-            "test_tree": self.test_tree.to_dict() if self.test_tree else None,
-            "final_score": round(self.final_score, 2) if self.final_score is not None else None,
-            "total_tests": self.total_tests,
-            "analysis": self.analysis,
-            "metadata": self.metadata
-        }
 
 class RunSubmissionTest:
     def __init__(self, submission_path: str, config: dict):
@@ -455,47 +372,12 @@ class CSubmissionTest(RunSubmissionTest):
 
     def _load_result_tree(self, result_file_path: str) -> TestResultNode:
         if not os.path.exists(result_file_path):
+            self.total_tests = 0
             return TestResultNode(label="C Tests", weight=1.0, passed=False, message="No results file found.")
-        # Load JSON files from results directory
-        results = {
-            'Ex1': None,
-            'Ex2': None,
-            'Ex3': None
-        }
-        for module in os.listdir(result_file_path):
-            try:
-                if module.endswith(".json"):
-                    json_result_file_path = json.load(open(os.path.join(result_file_path, module)))
-                    if 'report_ex1' in module:
-                        results['Ex1'] = json_result_file_path
-                    elif 'report_ex2' in module:
-                        results['Ex2'] = json_result_file_path
-                    elif 'report_ex3' in module:
-                        results['Ex3'] = json_result_file_path
-            except Exception as e:
-                return TestResultNode(label="C Tests", weight=1.0, passed=False, message=str(e))
 
-        root = TestResultNode(label="C++ Tests", weight=1.0, children=[])
-        for module, raw in results.items():
-            if raw is None:
-                continue
-            test_cases = raw.get("testsuites", {}).get("testsuite", [])
-            if not isinstance(test_cases, list):
-                test_cases = [test_cases]
+        root = load_gtest_results(os.path.join(result_file_path, 'json', ''))
 
-            total_tests = sum(int(ts["tests"]) for ts in test_cases)
-            for suite in test_cases:
-                suite_name = suite.get("name", module)
-                children = []
-                for case in suite.get("testcase", []):
-                    if isinstance(case, dict):
-                        children.append(TestResultNode(
-                            label=case.get("name", "Unnamed Test"),
-                            weight=1.0 / total_tests,
-                            passed="failure" not in case,
-                            message=case.get("failure", {}).get("#text") if isinstance(case.get("failure"), dict) else None
-                        ))
-                root.children.append(TestResultNode(label=suite_name, weight=1.0 / len(test_cases), children=children))
+        self.total_tests = root.num_tests
 
         root.calculate_score()
         return root
@@ -693,6 +575,7 @@ class CodeActivityTester:
         self._submissions = submissions
         self._options = options
         self._tester_class = CodeActivityTester._get_class(tester_class)
+        self._reports: dict[str, ExecutionReport] = {}
 
     @staticmethod
     def _get_class(class_name: str) -> type:
