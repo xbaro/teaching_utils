@@ -10,7 +10,7 @@ def _gtest_create_testcase_node(testcase, weight: float = 1.0):
     passed = testcase['status'] == 'RUN' and testcase['result'] == 'COMPLETED' and 'failures' not in testcase
     message = None
     if 'failures' in testcase:
-        message = f'==> {testcase['name']}:\n' + '\n'.join(failure['failure'] for failure in testcase['failures'])
+        message = f'==> {testcase["name"]}:\n' + '\n'.join(failure["failure"] for failure in testcase["failures"])
 
     return TestResultNode(
         label=testcase['name'],

@@ -26,6 +26,7 @@ python = ">=3.10,<=3.13"
 pygithub = "^2.3.0"
 python-dotenv = "^1.0.1"
 ollama = { version = "^0.4.7", optional = true }
+openai = { version = "^1.76.2", optional = true }
 sphinx = { version = "^8.1.3", optional = true }
 sphinx-rtd-theme = { version = "^3.0.2", optional = true }
 sphinxcontrib-napoleon = { version = "^0.7", optional = true }
@@ -39,6 +40,7 @@ valparse = "^0.2.1"
 docs = ["sphinx", "sphinx-rtd-theme", "sphinxcontrib-napoleon", "sphinx-pyproject"]
 nb = ["nbclient", "jupyterlab", "ipython"]
 ollama = ["ollama"]
+openai = ["openai"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.4.2"

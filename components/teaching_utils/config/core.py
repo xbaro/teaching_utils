@@ -22,6 +22,7 @@ class Config:
         return attr
 
     GITHUB_TOKEN = 'invalid'
+    OPENAI_API_KEY = 'invalid'
     EXPORT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '_data'))
 
 

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import uuid
 import json
+import re
 import valparse
 
 import xml.etree.ElementTree as ET
@@ -12,6 +13,7 @@ import teaching_utils.teaching_lib.text_utils
 
 from typing import Optional, Any, TextIO
 from .test_utils import TestResultNode, ExecutionReport
+from teaching_utils.config.core import Config
 
 
 from .submissions import SubmissionSet
@@ -60,6 +62,12 @@ class RunSubmissionTest:
         self.analysis_custom_prompt = config.get("analysis_custom_prompt")
         self.code_extraction_max_char = config.get("code_extraction_max_char", 12000)
         self.analysis_model = config.get("analysis_model", "codellama")
+        self.analysis_engine = config.get("analysis_engine", "ollama")
+
+        self.multi_project = config.get("multi_project", False)
+        self.multi_project_structure = config.get("multi_project_structure", "directory")
+        self.multi_project_module_regex = config.get("multi_project_modules", [])
+        self._multi_project_modules = {}
 
         self.total_tests = 0
 
@@ -197,7 +205,7 @@ class RunSubmissionTest:
             shutil.rmtree(self.host_tmp, ignore_errors=True)
         return report
 
-    def _extract_source_code(self, max_chars: int = 10000):
+    def _extract_source_code(self, max_chars: int = 10000, source_path: str = None) -> str | dict:
         """
         Extract source code from the given project directory, limited by total character count.
 
@@ -212,7 +220,10 @@ class RunSubmissionTest:
         collected_code = []
         total_chars = 0
 
-        for root, _, files in os.walk(self.submission_path):
+        if source_path is None:
+            source_path = self.submission_path
+
+        for root, _, files in os.walk(source_path):
             for file in files:
                 if any(file.endswith(ext) for ext in self.file_code_extensions):
                     file_path = os.path.join(root, file)
@@ -229,7 +240,49 @@ class RunSubmissionTest:
 
         return "\n".join(collected_code)
 
-    def analyze_code(self, code: str, model: str = 'codellama') -> str:
+    def _perform_analysis(self, prompt, model, role: str = 'user') -> dict:
+
+        if self.analysis_engine == 'codellama':
+            import ollama
+            req_response = ollama.chat(model=model, messages=[{"role": role, "content": prompt}])
+            response = {
+                "success": True,
+                "duration": req_response.total_duration,
+                "message": req_response.message['content'],
+            }
+
+        elif self.analysis_engine == 'openai':
+            from openai import OpenAI
+
+            config = Config()
+
+            client = OpenAI(
+                # This is the default and can be omitted
+                api_key=config.OPENAI_API_KEY,
+            )
+
+
+            req_response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": role, "content": prompt},
+                ],
+                temperature=0.5
+            )
+
+            response = {
+                "success": len(req_response.choices) > 0,
+                "duration": 0.0,
+                "message": json.loads(req_response.choices[0].message.content.replace('```json', '').replace('```', ''))['feedback'],
+                "extra_info": json.loads(req_response.choices[0].message.content.replace('```json', '').replace('```', ''))
+            }
+
+        else:
+            raise NotImplementedError(f"Unknown analysis engine: {self.analysis_engine}")
+
+        return response
+
+    def analyze_code(self, code: str | dict, model: str = 'codellama') -> str:
         """
         Analyze the given source code using an Ollama language model.
 
@@ -240,30 +293,40 @@ class RunSubmissionTest:
         Returns:
             str: The analysis result from the LLM.
         """
-        import ollama
         if self.analysis_custom_prompt is not None:
             prompt = self.analysis_custom_prompt
         else:
             """prompt = (
                 "You are a senior software engineer reviewing a multi-language project.\n"
                 "Please analyze the following source code files. Comment on design, structure, best practices, "
-                "potential improvements, and any technical debt you notice.\n\n"
-                f"{code}"
+                "potential improvements, and any technical debt you notice.\n\n"                
             )"""
             """prompt = (
                 "Ets un professor de programació corregint el codi lliurat per un estudiant.\n"
                 "Analitza amb un llenguatge amable i constructiu aquest codi, tenint en compte criteris de qualitat i bones pràctiques."
                 "Finalment, qualifica amb una nota de 0 a 100 el codi, explicant els criteris seguits. El codi:\n\n"
-                f"{code}"
             )"""
             prompt = (
-                "You are a programming teacher correcting the code submitted by a student.\n"
+                "You are a programming teacher assessing the code submitted by a student.\n"
                 "Analyze this code in a friendly and constructive manner, taking into account quality criteria and good practices."
-                "Finally, rate the code with a score from 0 to 100, explaining the criteria followed. The code:\n\n"
-                f"{code}"
+                "Finally, rate the code with a score from 0 to 100, explaining the followed criteria. The code:\n\n"
             )
-        response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
-        return response['message']['content']
+        if isinstance(code, str):
+            prompt += code
+            response = self._perform_analysis(prompt, model)
+            result = response['message']
+        elif isinstance(code, dict):
+            analysis = {}
+            for k, v in code.items():
+                k_prompt = prompt + v
+                k_response = self._perform_analysis(k_prompt, model)
+                analysis[k] = k_response['message']
+            result = ''
+            for k, v in analysis.items():
+                result += f"{k}:\n\n {v}\n\n"
+        else:
+            raise RuntimeError(f"Unsupported code type: {type(code)}")
+        return result
 
     def _find_first(self, base_path: str, filename: str) -> str | None:
         for root, dirs, files in os.walk(base_path):
@@ -386,29 +449,28 @@ class CSubmissionTest(RunSubmissionTest):
     def _prepare_code_execution(self):
         # Copy external files if provided
         base_path = self._compute_working_directory()
-
-        if base_path is not None and self.data_path is not None:
-            modules = os.listdir(base_path)
-            if len(modules) == 0:
-                logger.error(f"No modules found in base_path: {base_path}")
-                return
-            dict = {
-                'EX1_PATH': 'Ex1',
-                'EX2_PATH': 'Ex2',
-                'EX3_PATH': 'Ex3',
-                'RESULT_PATH': self.result_path,
-            }
-            for module in modules:
-                if '1' in module:
-                    dict['EX1_PATH'] = module
-                    continue
-                if '2' in module:
-                    dict['EX2_PATH'] = module
-                    continue
-                if '3' in module:
-                    dict['EX3_PATH'] = module
-                    continue
-
+        dict = {
+            'SOURCE_PATH': base_path,
+            'RESULT_PATH': self.result_path,
+        }
+        if not self.multi_project:
+            pass
+        elif self.multi_project_structure == 'folder':
+            if base_path is not None and self.data_path is not None:
+                modules = os.listdir(base_path)
+                if len(modules) == 0 and self.multi_project_structure:
+                    logger.error(f"No modules found in base_path: {base_path}")
+                    raise Exception(f"No modules found in base_path: {base_path}")
+                for module in self.multi_project_module_regex:
+                    mod_found = False
+                    for folder in modules:
+                        if re.search(self.multi_project_module_regex[module], folder):
+                            self._multi_project_modules[module] = folder
+                            dict[f'{module}_PATH'] = folder
+                            mod_found = True
+                            continue
+                    if not mod_found:
+                        logger.error(f"Module {module} not found")
             shutil.copytree(self.data_path, base_path, dirs_exist_ok=True)
             teaching_utils.teaching_lib.text_utils.replace_file_keys(os.path.join(base_path, 'CMakeLists.txt'), dict, '$!-', '-!$')
 
@@ -419,6 +481,20 @@ class CSubmissionTest(RunSubmissionTest):
             return os.path.dirname(os.path.dirname(base_path))
 
         return None
+
+    def _extract_source_code(self, max_chars: int = 10000, source_path: str = None) -> str | dict:
+        if source_path is None:
+            source_path = self._compute_working_directory()
+
+        src_code = {}
+        for exercise in os.listdir(source_path):
+            if os.path.isdir(os.path.join(source_path, exercise)):
+                code = super()._extract_source_code(max_chars, os.path.join(source_path, exercise))
+                if code is not None and len(code) > 0:
+                    src_code[exercise] = code
+
+        return src_code
+
 
     def _collect_additional_metrics(self, result_dir: str, report: ExecutionReport):
         report.metadata['memcheck'] = {}
