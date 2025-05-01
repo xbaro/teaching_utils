@@ -53,38 +53,46 @@ if __name__ == '__main__':
             './_data/ed/pr2/lliuraments',
             './_data/ed/courseid_87000_participants.csv',
             './_data/ed/pr2/out',
-            remove_existing=True,
+            remove_existing=False,
             groups=['GrupA', 'GrupB', 'GrupC', 'GrupD', 'GrupF'],
         )
 
         analysis_prompt_criteria = {
-            "EX1_CRITERIA": ("- C1: Constructor (weight: 0)\n"
-            "- C2: Destructor (weight: 0)\n"
-            "- C3: isEmpty (weight: 0.25)\n"
-            "- C4: isFull (weight: 0.25)\n"
-            "- C5: getFront (weight: 0.25)\n"
-            "- C6: enqueue (weight: 0.5)\n"
-            "- C7: dequeue (weight: 0.5)\n"
-            "- C8: print (weight: 0.25)\n"),
-            "EX2_CRITERIA": ()
-
+            "EX1_CRITERIA": (
+                "- C1: Constructor (weight: 0)\n"
+                "- C2: Destructor (weight: 0)\n"
+                "- C3: isEmpty (weight: 0.25)\n"
+                "- C4: isFull (weight: 0.25)\n"
+                "- C5: getFront (weight: 0.25)\n"
+                "- C6: enqueue (weight: 0.5)\n"
+                "- C7: dequeue (weight: 0.5)\n"
+                "- C8: print (weight: 0.25)\n"),
+            "EX2_CRITERIA": (
+                "- C1: Node: constructor (weight: 0,1)\n"
+                "- C2: Node: getElement (weight: 0,1)\n"
+                "- C3: Node: getNext, setNext (weight: 0,1)\n"
+                "- C4: CuaEncadenada: Constructor (weight: 0,25)\n"
+                "- C5: CuaEncadenada: Destructor (weight: 0,25)\n"
+                "- C6: CuaEncadenada: isEmpty (weight: 0,2)\n"
+                "- C7: CuaEncadenada: enqueue (weight: 0,5)\n"
+                "- C8: CuaEncadenada: dequeue (weight: 0,5)\n"
+                "- C9: CuaEncadenada: print (weight: 0,25)\n"),
+            "EX3_CRITERIA": (
+                "C1: llegir fitxer n-Entrades (weight: 0,25)\n"
+                "C2: Eliminar peli (weight: 0,25)\n"
+                "C3: inserir n-entrades desde teclat (weight: 0,5)\n"
+                "C4: imprimir la cua de pelis (weight: 0,25)\n")
         }
+
         analysis_prompt_template = (
             "You are a university-level programming instructor evaluating code submitted by a student in an undergraduate computer science course.\n"
             "Please analyze the code in a friendly, constructive, and pedagogical tone. Focus on the implementation and correctness of specific queue operations.\n"
             "Do not comment on or deduct points for the use of raw pointers versus smart pointers — students are just beginning to learn C++.\n"
             "Also, ignore the language used in comments and documentation — do not evaluate spelling, grammar, or language choice in comments or string literals.\n\n"
             "After the analysis, assign a final score from 0 to 100, based on the weighted average of the following criteria:\n\n"
-            "- C1: Constructor (weight: 0)\n"
-            "- C2: Destructor (weight: 0)\n"
-            "- C3: isEmpty (weight: 0.25)\n"
-            "- C4: isFull (weight: 0.25)\n"
-            "- C5: getFront (weight: 0.25)\n"
-            "- C6: enqueue (weight: 0.5)\n"
-            "- C7: dequeue (weight: 0.5)\n"
-            "- C8: print (weight: 0.25)\n\n"
+            "{criteria}\n"
             "Return the results as a JSON object with the following fields:\n"
-            "- 'feedback': A written summary of the evaluation in Catalan, directed to the student.\n"
+            "- 'feedback': A written summary of the evaluation in Catalan, directed to the student. Must relate comments with student's code.\n"
             "- 'score': A numeric value (0–100) representing the overall quality of the code.\n"
             "- 'criteria': A list of objects, each representing one evaluation criterion. Each object must include:\n"
             "    - 'id': A unique identifier for the criterion (e.g., 'C1')\n"
@@ -103,6 +111,7 @@ if __name__ == '__main__':
             'teaching_utils.teaching_lib.code_tester.CSubmissionTest',
             options={
                 "max_time": 240,
+                "run_tests": False,
                 "perform_analysis": True,
                 "code_extraction_max_char": -1,
                 #"analysis_model": "codellama:70b",
@@ -112,19 +121,20 @@ if __name__ == '__main__':
                 "analysis_model": "gpt-4-turbo",
                 "analysis_engine": "openai",
                 "analysis_custom_prompt": {
-                    analysis_prompt_template,
+                    'Exercici1': analysis_prompt_template.format(criteria=analysis_prompt_criteria['EX1_CRITERIA']),
+                    'Exercici2': analysis_prompt_template.format(criteria=analysis_prompt_criteria['EX2_CRITERIA']),
+                    'Exercici3': analysis_prompt_template.format(criteria=analysis_prompt_criteria['EX3_CRITERIA']),
                 },
                 "data_path": "./_data/ed/pr2/data",
                 "host_tmp_basepath": "./_data/ed/pr2/tmp",
                 "remove_tmp": False,
                 "multi_project": True,
-                "multi_project_structure": "directory",
+                "multi_project_structure": "folder",
                 "multi_project_module_regex": {
                     'Exercici1': '1',
                     'Exercici2': '2',
                     'Exercici3': '3',
                 }
-
             },
         )
         #tester.run_tests(start=0, limit=3, cache_file='./_data/ed/pr2/out/cache_all_groups.pkl')

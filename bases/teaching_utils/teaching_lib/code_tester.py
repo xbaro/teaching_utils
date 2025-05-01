@@ -40,6 +40,7 @@ class RunSubmissionTest:
         self.submission_path = submission_path
         self.image = config.get("image")
         self.max_time = config.get("max_time", 10)
+        self.run_tests = config.get("run_tests", True)
         self.run_cmd = config.get("run_cmd")
         self.additional_mounts = config.get("additional_mounts", [])
 
@@ -66,8 +67,8 @@ class RunSubmissionTest:
 
         self.multi_project = config.get("multi_project", False)
         self.multi_project_structure = config.get("multi_project_structure", "directory")
-        self.multi_project_module_regex = config.get("multi_project_modules", [])
-        self._multi_project_modules = {}
+        self.multi_project_module_regex = config.get("multi_project_module_regex", [])
+        self._multi_project_modules = None
 
         self.total_tests = 0
 
@@ -148,33 +149,48 @@ class RunSubmissionTest:
         ])
 
         try:
-            result = subprocess.run(
-                docker_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=self.max_time,
-                text=True
-            )
+            # Run the command in the Docker container
+            if self.run_tests:
+                result = subprocess.run(
+                    docker_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=self.max_time,
+                    text=True
+                )
 
-            try:
-                tree = self._load_result_tree(results_file_path)
-            except FileNotFoundError:
-                # If there are errors doing the tests, the final testing path is not created
-                tree = None
-            final_score = tree.calculate_score() if tree else 0.0
+                try:
+                    tree = self._load_result_tree(results_file_path)
+                except FileNotFoundError:
+                    # If there are errors doing the tests, the final testing path is not created
+                    tree = None
+                final_score = tree.calculate_score() if tree else 0.0
 
-            report = ExecutionReport(
-                success=result.returncode == 0,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                return_code=result.returncode,
-                timeout=False,
-                results_path=host_results_path,
-                test_tree=tree,
-                final_score=final_score,
-                total_tests=self.total_tests,
-                analysis=None,
-            )
+                report = ExecutionReport(
+                    success=result.returncode == 0,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    return_code=result.returncode,
+                    timeout=False,
+                    results_path=host_results_path,
+                    test_tree=tree,
+                    final_score=final_score,
+                    total_tests=self.total_tests,
+                    analysis=None,
+                )
+            else:
+                report = ExecutionReport(
+                    success=True,
+                    stdout='',
+                    stderr='',
+                    return_code=None,
+                    timeout=False,
+                    results_path=host_results_path,
+                    test_tree=None,
+                    final_score=None,
+                    total_tests=0,
+                    analysis=None,
+                )
 
             if self.perform_analysis:
                 source_code = self._extract_source_code(self.code_extraction_max_char)
@@ -282,7 +298,7 @@ class RunSubmissionTest:
 
         return response
 
-    def analyze_code(self, code: str | dict, model: str = 'codellama') -> str:
+    def analyze_code(self, code: str | dict, model: str = 'codellama') -> dict:
         """
         Analyze the given source code using an Ollama language model.
 
@@ -314,16 +330,30 @@ class RunSubmissionTest:
         if isinstance(code, str):
             prompt += code
             response = self._perform_analysis(prompt, model)
-            result = response['message']
+            result = {
+                'message': response['message'],
+                'info': None,
+            }
         elif isinstance(code, dict):
             analysis = {}
             for k, v in code.items():
-                k_prompt = prompt + v
+                if isinstance(prompt, dict):
+                    k_prompt = prompt.get(k, prompt)
+                else:
+                    k_prompt = prompt
+                k_prompt += v
                 k_response = self._perform_analysis(k_prompt, model)
-                analysis[k] = k_response['message']
-            result = ''
+                analysis[k] = {
+                    'message': k_response['message'],
+                    'info': k_response,
+                }
+
+            result = {
+                'message': '',
+                'info': analysis
+            }
             for k, v in analysis.items():
-                result += f"{k}:\n\n {v}\n\n"
+                result['message'] += f"{k}:\n\n {v['message']}\n\n"
         else:
             raise RuntimeError(f"Unsupported code type: {type(code)}")
         return result
@@ -461,12 +491,13 @@ class CSubmissionTest(RunSubmissionTest):
                 if len(modules) == 0 and self.multi_project_structure:
                     logger.error(f"No modules found in base_path: {base_path}")
                     raise Exception(f"No modules found in base_path: {base_path}")
+                self._multi_project_modules = {}
                 for module in self.multi_project_module_regex:
                     mod_found = False
                     for folder in modules:
                         if re.search(self.multi_project_module_regex[module], folder):
-                            self._multi_project_modules[module] = folder
-                            dict[f'{module}_PATH'] = folder
+                            self._multi_project_modules[module] = os.path.join(base_path, folder)
+                            dict[f'{module.upper()}_PATH'] = folder
                             mod_found = True
                             continue
                     if not mod_found:
@@ -487,11 +518,13 @@ class CSubmissionTest(RunSubmissionTest):
             source_path = self._compute_working_directory()
 
         src_code = {}
-        for exercise in os.listdir(source_path):
-            if os.path.isdir(os.path.join(source_path, exercise)):
-                code = super()._extract_source_code(max_chars, os.path.join(source_path, exercise))
+        if self._multi_project_modules is not None:
+            for module in self._multi_project_modules:
+                code = super()._extract_source_code(max_chars, self._multi_project_modules[module])
                 if code is not None and len(code) > 0:
-                    src_code[exercise] = code
+                    src_code[module] = code
+        else:
+            src_code = super()._extract_source_code(max_chars, source_path)
 
         return src_code
 
