@@ -194,7 +194,14 @@ class RunSubmissionTest:
 
             if self.perform_analysis:
                 source_code = self._extract_source_code(self.code_extraction_max_char)
-                report.analysis = self.analyze_code(source_code, self.analysis_model)
+                analysis = self.analyze_code(source_code, self.analysis_model)
+                report.analysis = analysis['message']
+                report.metadata['analysis'] = {
+                    'message': analysis['message'],
+                    'info': analysis['info'],
+                    'model': self.analysis_model,
+                    'engine': self.analysis_engine,
+                }
 
             self._collect_additional_metrics(results_file_path, report)
 
@@ -778,9 +785,13 @@ class CodeActivityTester:
         if remove_groups is None:
             remove_groups = []
         remove_groups = set(remove_groups)
-        with open(out_file, 'w') as fout:
+        with (open(out_file, 'w') as fout):
             if format == 'csv':
-                fout.write(f"Nom,Cognoms,\"Número ID\",Grups,\"Grups Filtrats\",Qualificació,\"Feedback\"\n")
+                fout.write(f"Nom,Cognoms,\"Número ID\",Grups,\"Grups Filtrats\",Qualificació,\"Feedback\"")
+                extra_headers = self._get_extra_headers()
+                if extra_headers is not None and len(extra_headers) > 0:
+                    fout.write("," + ",".join(extra_headers))
+                fout.write("\n")
             elif format == 'json':
                 fout.write("{\n\"results\": [\n")
             else:
@@ -798,7 +809,14 @@ class CodeActivityTester:
         if format == 'csv':
             fout.write(f"\"{info.get('student_name')}\",\"{info.get('student_surname')}\",{info.get('student_id')},\"{','.join(info.get('student_groups', []))}\"")
             fout.write(",\"" + ','.join([g for g in info.get('student_groups', []) if g not in remove_groups]) + "\"")
-            fout.write(f",{result.final_score:.2f},\"{self._build_feedback(result)}\"\n")
+            score = result.final_score
+            if score is None:
+                score = 0
+            fout.write(f",{score:.2f},\"{self._build_feedback(result)}\"")
+            extra_fields = self._get_extra_fields(result)
+            if extra_fields is not None and len(extra_fields) > 0:
+                fout.write("," + ",".join(extra_fields))
+            fout.write("\n")
         elif format == 'json':
             res_json = result.to_dict()
             res_json["score"] = round(res_json["final_score"], 2)
@@ -806,6 +824,55 @@ class CodeActivityTester:
             fout.write(json.dumps(res_json, indent=4))
         else:
             raise NotImplementedError
+
+
+    def _has_ai_score(self):
+        return self._options.get("perform_analysis", False) and self._options.get("analysis_engine", None) == 'openai'
+
+    def _get_extra_headers(self):
+        extra_headers = []
+        if self._options.get("multi_project", False):
+            for module in self._options.get("multi_project_module_regex", {}).keys():
+                extra_headers.append(f"\"{module} Score\"")
+                extra_headers.append(f"\"{module} Feedback\"")
+                if self._has_ai_score():
+                    if len(self._reports) > 0:
+                        module_info = self._get_report_module_analysis_info(self._reports[list(self._reports.keys())[0]], module)
+                        if 'extra_info' in module_info:
+                            if 'score' in module_info['extra_info']:
+                                extra_headers.append(f"\"{module} AI Score\"")
+                            if 'feedback' in module_info['extra_info']:
+                                extra_headers.append(f"\"{module} AI Feedback\"")
+                            if 'criteria' in module_info['extra_info']:
+                                for criteria in module_info['extra_info']['criteria']:
+                                    extra_headers.append(f"\"{module} - {criteria['id']} [{criteria['weight']}]\"")
+                                    extra_headers.append(f"\"{module} - {criteria['id']} feedback\"")
+        return extra_headers
+
+    def _get_extra_fields(self, report):
+        extra_fields = []
+        if self._options.get("multi_project", False):
+            for module in self._options.get("multi_project_module_regex", {}).keys():
+                extra_fields.append(f"0.0")
+                extra_fields.append(f"")
+                if self._has_ai_score():
+                    module_info = self._get_report_module_analysis_info(report, module)
+                    if 'extra_info' in module_info:
+                        if 'score' in module_info['extra_info']:
+                            extra_fields.append(f"{module_info['extra_info']['score']}")
+                        if 'feedback' in module_info['extra_info']:
+                            extra_fields.append(f"\"{module_info['extra_info']['feedback']}\"")
+                        if 'criteria' in module_info['extra_info']:
+                            for criteria in module_info['extra_info']['criteria']:
+                                extra_fields.append(f"{criteria['score']}")
+                                extra_fields.append(f"\"{criteria['justification']}\"")
+        return extra_fields
+
+    def _get_report_module_analysis_info(self, report, module):
+        if 'info' in report.metadata['analysis'] and module in report.metadata['analysis']['info'] and 'info' in report.metadata['analysis']['info'][module]:
+            return report.metadata['analysis']['info'][module]['info']
+        return None
+
 
     def _build_feedback(self, report: ExecutionReport) -> str:
         feedback = []
