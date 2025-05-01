@@ -857,7 +857,7 @@ class CodeActivityTester:
                 extra_fields.append(f"")
                 if self._has_ai_score():
                     module_info = self._get_report_module_analysis_info(report, module)
-                    if 'extra_info' in module_info:
+                    if module_info is not None and 'extra_info' in module_info:
                         if 'score' in module_info['extra_info']:
                             extra_fields.append(f"{module_info['extra_info']['score']}")
                         if 'feedback' in module_info['extra_info']:
