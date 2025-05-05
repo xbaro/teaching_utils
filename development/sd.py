@@ -9,6 +9,55 @@ logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
 
+    if __name__ == '__main__':
+
+        print("SD")
+
+        clean_data = True
+
+        pr1 = True
+        pr2 = False
+
+        if pr1:
+            # Exporta tots els lliuraments i els separa per grups
+            teaching_lib.submission_utils.export_groups(
+                './_data/sd/pr1/lliuraments',
+                './_data/sd/pr1/courseid_87020_participants.csv',
+                './_data/sd/pr1/out',
+                remove_existing=False,
+                groups=['B', 'C'],
+            )
+
+            submissions = SubmissionSet.load_submissions('./_data/sd/pr1/out/groups/B')
+            tester = teaching_lib.code_tester.CodeActivityTester(
+                submissions,
+                'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest',
+                options={
+                    "max_time": 240,
+                    "run_tests": True,
+                    "perform_analysis": False,
+                    "code_extraction_max_char": -1,
+                    "host_tmp_basepath": "./_data/sd/pr1/tmp",
+                    "remove_tmp": False,
+                    "multi_project": True,
+                    "multi_project_structure": "folder",
+                    "multi_project_module_regex": {
+                        'Client': 'Client',
+                        'ComUtils': 'ComUtils',
+                        'Server': 'Server',
+                    }
+                },
+            )
+            for group in ['B', 'C']:
+                tester.submissions = SubmissionSet.load_submissions(f'./_data/sd/pr1/out/groups/{group}')
+                tester.run_tests(cache_file=f'./_data/sd/pr1/out/cache_group_{group}.pkl')
+                tester.export_results(f'./_data/sd/pr1/out/report{group}.csv',
+                                      override=True,
+                                      format='csv',
+                                      remove_groups=['2024_364312_Q2_T1']
+                                      )
+
+
     """import json
 
     with open('C:\\Users\\xavie\\OneDrive\\Escriptori\\Uptitude_JSON.json', 'r', encoding='utf-8') as answ:
@@ -99,8 +148,8 @@ if __name__ == '__main__':
     #print(f"Final Score: {report.final_score:.2f}")
     #print(f"Tree Root: {report.test_tree.label}")
     #print(f"Num Tests: {report.total_tests}")
-
-    submissions = SubmissionSet.load_submissions('../_data/sd/pr1/out/submissions')
+"""
+    submissions = SubmissionSet.load_submissions('./_data/sd/pr1/out/groups/C')
     tester = teaching_lib.code_tester.CodeActivityTester(
         submissions,
         'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest',
@@ -110,9 +159,11 @@ if __name__ == '__main__':
             "code_extraction_max_char": -1,
         },
     )
-    tester.run_tests(start=0, limit=None, cache_file='../_data/sd/pr1/out/cache_all_groups.pkl')
-    tester.export_results('../_data/sd/pr1/out/report.csv',
+    tester.run_tests()
+    tester.export_results('./_data/sd/pr1/out/report.csv',
                           override=True,
                           format='csv',
                           remove_groups=['2024_364312_Q2_T1']
                           )
+
+"""
