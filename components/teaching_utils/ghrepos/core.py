@@ -235,12 +235,40 @@ def get_repository_stats(repo: Repository):  # noqa: C901
         if logs_req.status_code == 200:
             logs = logs_req.content
 
+    pull_requests = {
+        'data': {},
+        'total': 0,
+    }
+
+    for pr in repo.get_pulls(state='all'):
+        pull_requests['total'] += 1
+        pull_requests['data'][pr.id] = {
+            'id': pr.id,
+            'title': pr.title,
+            'body': pr.body,
+            'state': pr.state,
+            'created_at': pr.created_at,
+            'updated_at': pr.updated_at,
+            'closed_at': pr.closed_at,
+            'merged_at': pr.merged_at,
+            'merged_by': pr.merged_by,
+            'merged': pr.merged,
+            'user': pr.user.login,
+            'changed_files': pr.changed_files,
+            'commits': pr.commits,
+            'deletions': pr.deletions,
+            'additions': pr.additions,
+            'comments': list(pr.get_comments()),
+            'review_comments': list(pr.get_review_comments()),
+        }
+
     stats = {
         'branches': branches_stats,
         'commits': commits_data,
         'contributors': contributors,
         'runs': runs,
-        'logs': logs
+        'logs': logs,
+        'pull_requests': pull_requests,
     }
 
     # To close connections after use

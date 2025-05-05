@@ -42,6 +42,40 @@ class TestResultNode:
             score=self.score
         )
 
+    def generate_mermaid_diagram(self, max_depth: int = 2) -> str:
+        lines = ["```mermaid", "graph TD"]
+        node_ids = {}
+
+        def escape(label: str) -> str:
+            return label.replace('"', '\\"').replace("\n", " ")
+
+        def get_node_id(node: TestResultNode, count: int) -> str:
+            return f"node{count}"
+
+        def traverse(node: TestResultNode, depth: int, parent_id: Optional[str], count: list[int]):
+            if depth > max_depth:
+                return
+
+            node_id = get_node_id(node, count[0])
+            node_ids[id(node)] = node_id
+
+            status = "✅" if node.passed else ("❌" if node.passed is False else "⏳")
+            label = escape(node.label)
+            node_text = f"{label}<br/>{status} | Score: {node.score:.2f} | Weight: {node.weight:.2f}"
+
+            lines.append(f'{node_id}["{node_text}"]')
+
+            if parent_id:
+                lines.append(f"{parent_id} --> {node_id}")
+
+            count[0] += 1
+
+            for child in node.children:
+                traverse(child, depth + 1, node_id, count)
+
+        traverse(self, 1, None, [0])
+        lines.append("```")
+        return "\n".join(lines)
 
 
 @dataclass
@@ -87,3 +121,50 @@ class ExecutionReport:
             "analysis": self.analysis,
             "metadata": self.metadata
         }
+
+    def to_markdown(self):
+        md_report = ""
+        md_report += f'\n# Estudiant\n'
+        md_report += f'- Nom: {self.submission._student_fullname}\n'
+        md_report += f'- Grups: {self.submission._student_groups}\n'
+
+        md_report += f'\n# Execució del codi\n'
+        md_report += f'- Success: {self.success}\n'
+        md_report += f'- Timeout: {self.timeout}\n'
+        md_report += f'- Stdout: {self.stdout}\n'
+        md_report += f'- Stderr: {self.stderr}\n'
+        md_report += f'- Return Code: {self.return_code}\n'
+
+        md_report += f'\n## Proves\n'
+        md_report += f'- Total Tests: {self.total_tests}\n'
+        md_report += f'- Final Score: {self.final_score}\n'
+        if self.test_tree is not None:
+            md_report += self.test_tree.generate_mermaid_diagram(3)
+
+        if 'coverage' in self.metadata:
+            md_report += f'\n## Cobertura\n'
+            md_report += '| Mòdul | Percentage | Covered | Missed | Total | Error |\n'
+            md_report += '|--------|------------|---------|--------|--------|--------|\n'
+            for module, report in self.metadata['coverage'].items():
+                percent = report.get("coverage_percent")
+                if percent is not None:
+                    percent_str = f'{percent:.2f}%'
+                else:
+                    percent_str = 'N/A'
+                md_report += f'| {module} | {percent_str} | {report.get("coverage_covered")} | {report.get("coverage_missed")} | {report.get("coverage_total")} | {report.get("coverage_error")} |\n'
+
+        if 'checkstyle' in self.metadata:
+            md_report += f'\n## Estil de codi\n'
+            md_report += '| Mòdul | Violations | Error |\n'
+            md_report += '|--------|------------|--------|\n'
+            for module, report in self.metadata['checkstyle'].items():
+                md_report += f'| {module} | {report.get("checkstyle_violations")} | {report.get("checkstyle_error")} |\n'
+
+        if self.analysis is not None:
+            md_report += f'\n# Anàlisis\n'
+
+
+        return md_report
+        
+        
+        

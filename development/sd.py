@@ -9,11 +9,23 @@ logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
 
-    if __name__ == '__main__':
+    print("SD")
 
-        print("SD")
+    target_groups = ['B', 'C']
 
-        clean_data = True
+    clean_data = True
+    repo_stats = True
+
+    if repo_stats:
+
+        for target_group in target_groups:
+            repositories = teaching_lib.repository.CodeRepositorySet()
+            repositories.load_repositories(f'SoftwareDistribuitUB-2025/practica-1-{target_group.lower()}', 1, 25)
+
+            repositories.export_stats(f'./_data/sd/pr1/repo_stats/{target_group}/')
+
+        exit(0)
+
 
         pr1 = True
         pr2 = False
@@ -25,7 +37,7 @@ if __name__ == '__main__':
                 './_data/sd/pr1/courseid_87020_participants.csv',
                 './_data/sd/pr1/out',
                 remove_existing=False,
-                groups=['B', 'C'],
+                groups=target_groups,
             )
 
             submissions = SubmissionSet.load_submissions('./_data/sd/pr1/out/groups/B')
@@ -48,13 +60,17 @@ if __name__ == '__main__':
                     }
                 },
             )
-            for group in ['B', 'C']:
+            for group in target_groups:
                 tester.submissions = SubmissionSet.load_submissions(f'./_data/sd/pr1/out/groups/{group}')
                 tester.run_tests(cache_file=f'./_data/sd/pr1/out/cache_group_{group}.pkl')
                 tester.export_results(f'./_data/sd/pr1/out/report{group}.csv',
                                       override=True,
                                       format='csv',
                                       remove_groups=['2024_364312_Q2_T1']
+                                      )
+                tester.export_code(f'./_data/sd/pr1/out/prepared/{group}',
+                                      override=True,
+                                      format='md'
                                       )
 
 

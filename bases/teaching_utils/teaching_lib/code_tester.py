@@ -806,9 +806,12 @@ class CodeActivityTester:
             logger.error("Submission result not available. Row skipped.")
             return
         info = result.submission.get_info()
+        student_info = {}
+        if info is not None:
+            student_info = info.get('student')
         if format == 'csv':
-            fout.write(f"\"{info.get('student_name')}\",\"{info.get('student_surname')}\",{info.get('student_id')},\"{','.join(info.get('student_groups', []))}\"")
-            fout.write(",\"" + ','.join([g for g in info.get('student_groups', []) if g not in remove_groups]) + "\"")
+            fout.write(f"\"{student_info.get('name')}\",\"{student_info.get('surname')}\",{student_info.get('id')},\"{','.join(student_info.get('groups', []))}\"")
+            fout.write(",\"" + ','.join([g for g in student_info.get('groups', []) if g not in remove_groups]) + "\"")
             score = result.final_score
             if score is None:
                 score = 0
@@ -824,6 +827,19 @@ class CodeActivityTester:
             fout.write(json.dumps(res_json, indent=4))
         else:
             raise NotImplementedError
+
+    def export_code(self, out_dir: str, format: str = 'csv', override=False, feedback_file='Feedback.md'):
+        if os.path.exists(out_dir) and not override:
+            raise FileExistsError(f"Output file {out_dir} already exists. Use override=True to overwrite.")
+        os.makedirs(os.path.dirname(out_dir), exist_ok=True)
+        for result in self._reports.values():
+            submission_out_dir = os.path.join(out_dir, result.submission.get_info()['key'])
+            shutil.copytree(result.submission.get_local_path(), submission_out_dir, dirs_exist_ok=True)
+            with open(os.path.join(submission_out_dir, feedback_file), 'w') as fout:
+                if format == 'md':
+                    fout.write(result.to_markdown())
+                else:
+                    raise NotImplementedError(f"Format {format} not supported")
 
 
     def _has_ai_score(self):
