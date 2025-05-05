@@ -143,14 +143,14 @@ class CodeRepositorySet(SubmissionSet):
 
             if pr['comments']:
                 for comment in pr['comments']:
-                    md_report += f'- {comment["body"]}\n'
+                    md_report += f'- [{comment.user.login}]: {comment.body}\n'
             else:
                 md_report += '_Cap comentari_\n'
 
             md_report += f'\n**🔍 Comentaris dels revisors:**\n'
             if pr['review_comments']:
                 for rev_comment in pr['review_comments']:
-                    md_report += f'- {rev_comment["body"]}\n'
+                    md_report += f'- [{rev_comment.user.login}]: {rev_comment.body}\n'
             else:
                 md_report += '_Cap comentari_\n'
 
