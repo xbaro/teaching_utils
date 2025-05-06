@@ -11,36 +11,36 @@ if __name__ == '__main__':
 
     print("SD")
 
-    target_groups = ['B', 'C']
+    #target_groups = ['B', 'C']
+    target_groups = ['C']
 
-    clean_data = True
-    repo_stats = True
+    clean_data = False
+    repo_stats = False
 
-    if repo_stats:
+    pr1 = True
+    pr2 = False
 
-        for target_group in target_groups:
-            repositories = teaching_lib.repository.CodeRepositorySet()
-            repositories.load_repositories(f'SoftwareDistribuitUB-2025/practica-1-{target_group.lower()}', 1, 25)
+    if pr1:
 
-            repositories.export_stats(f'./_data/sd/pr1/repo_stats/{target_group}/')
+        if repo_stats:
 
-        exit(0)
+            for target_group in target_groups:
+                repositories = teaching_lib.repository.CodeRepositorySet()
+                repositories.load_repositories(f'SoftwareDistribuitUB-2025/practica-1-{target_group.lower()}', 11, 25)
 
+                repositories.export_stats(f'./_data/sd/pr1/repo_stats/{target_group}/')
 
-        pr1 = True
-        pr2 = False
+        # Exporta tots els lliuraments i els separa per grups
+        teaching_lib.submission_utils.export_groups(
+            './_data/sd/pr1/lliuraments',
+            './_data/sd/pr1/courseid_87020_participants.csv',
+            './_data/sd/pr1/out',
+            remove_existing=False,
+            groups=target_groups,
+        )
 
-        if pr1:
-            # Exporta tots els lliuraments i els separa per grups
-            teaching_lib.submission_utils.export_groups(
-                './_data/sd/pr1/lliuraments',
-                './_data/sd/pr1/courseid_87020_participants.csv',
-                './_data/sd/pr1/out',
-                remove_existing=False,
-                groups=target_groups,
-            )
-
-            submissions = SubmissionSet.load_submissions('./_data/sd/pr1/out/groups/B')
+        for group in target_groups:
+            submissions = SubmissionSet.load_submissions(f'./_data/sd/pr1/out/groups/{group}')
             tester = teaching_lib.code_tester.CodeActivityTester(
                 submissions,
                 'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest',
@@ -60,19 +60,16 @@ if __name__ == '__main__':
                     }
                 },
             )
-            for group in target_groups:
-                tester.submissions = SubmissionSet.load_submissions(f'./_data/sd/pr1/out/groups/{group}')
-                tester.run_tests(cache_file=f'./_data/sd/pr1/out/cache_group_{group}.pkl')
-                tester.export_results(f'./_data/sd/pr1/out/report{group}.csv',
-                                      override=True,
-                                      format='csv',
-                                      remove_groups=['2024_364312_Q2_T1']
-                                      )
-                tester.export_code(f'./_data/sd/pr1/out/prepared/{group}',
-                                      override=True,
-                                      format='md'
-                                      )
-
+            tester.run_tests(cache_file=f'./_data/sd/pr1/out/cache_group_{group}.pkl')
+            tester.export_results(f'./_data/sd/pr1/out/report{group}.csv',
+                                  override=True,
+                                  format='csv',
+                                  remove_groups=['2024_364312_Q2_T1']
+                                  )
+            tester.export_code(f'./_data/sd/pr1/out/prepared/{group}',
+                                  override=True,
+                                  format='md'
+                                  )
 
     """import json
 
