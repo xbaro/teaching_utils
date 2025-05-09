@@ -68,7 +68,7 @@ def get_repository_range(base: str, range_min: int = 1, range_max: int = 25) -> 
                 repo = client.get_repo(f'{base}{num}')
             except GithubException:
                 pass
-        if repo is not None:
+        if repo is not None and repo.full_name == f'{base}{num:02d}':
             repos.append(repo)
     # To close connections after use
     client.close()
