@@ -2,7 +2,8 @@ import os.path
 import shutil
 
 from github.Repository import Repository
-from teaching_utils import ghrepos, config, testing
+from teaching_utils import ghrepos, testing
+from teaching_utils.config import settings
 from .submissions import Submission, SubmissionSet
 
 
@@ -60,7 +61,10 @@ class CodeRepositorySet(SubmissionSet):
             export_path = self._export_path
 
         for repo_name in self._repos:
-            self._repos[repo_name].clone(export_path, force)
+            try:
+                self._repos[repo_name].clone(export_path, force)
+            except Exception as e:
+                settings.logger.error(f'Failed to clone repo {repo_name}: {e}')
 
     def export_files(self, export_prefix: str, path_filter: str = None, extension_filter: str = None):
         for repo_name in self._repos:
