@@ -16,7 +16,7 @@ from .test_utils import TestResultNode, ExecutionReport
 from teaching_utils.config.core import Config
 
 
-from .submissions import SubmissionSet
+from .submissions import SubmissionSet, Submission
 from .gtest_utils import load_gtest_results
 
 
@@ -741,6 +741,21 @@ class CodeActivityTester:
             m = getattr(m, comp)
         return m
 
+    def run_submission_tests(self, submission: Submission) -> ExecutionReport:
+        logger.info(f"Testing {submission}")
+
+        try:
+            sub_test = self._tester_class(submission.get_local_path(), config=self._options)
+            report = sub_test.run()
+            report.submission = submission
+        except Exception as e:
+            logger.error(e)
+            report = ExecutionReport(return_code=-1, results_path=None, success=False, stderr=str(e), stdout='',
+                                     timeout=False)
+
+        return report
+
+
     def run_tests(self, start: int = 0, limit: int = None, cache_file: str = None ):
         cache = {}
         if cache_file is not None and os.path.exists(cache_file):
@@ -762,13 +777,7 @@ class CodeActivityTester:
                 logger.info(f"Found cached result for submission {submission.get_key()}")
                 report = cache[submission.get_key()]
             else:
-                try:
-                    sub_test = self._tester_class(submission.get_local_path(), config=self._options)
-                    report = sub_test.run()
-                    report.submission = submission
-                except Exception as e:
-                    logger.error(e)
-                    report = ExecutionReport(return_code=-1, results_path=None, success=False, stderr=str(e), stdout='', timeout=False)
+                report = self.run_submission_tests(submission)
                 cache[submission.get_key()] = report
                 if cache_file is not None:
                     with open(cache_file, "wb") as f:
@@ -806,9 +815,15 @@ class CodeActivityTester:
             logger.error("Submission result not available. Row skipped.")
             return
         info = result.submission.get_info()
+        student_info = {}
+        if info is not None:
+            student_info = info.get('student')
+        if student_info is None:
+            logger.error(f"Student info not available. Row skipped: {result.submission.get_key()}")
+            return
         if format == 'csv':
-            fout.write(f"\"{info.get('student_name')}\",\"{info.get('student_surname')}\",{info.get('student_id')},\"{','.join(info.get('student_groups', []))}\"")
-            fout.write(",\"" + ','.join([g for g in info.get('student_groups', []) if g not in remove_groups]) + "\"")
+            fout.write(f"\"{student_info.get('name')}\",\"{student_info.get('surname')}\",{student_info.get('id')},\"{','.join(student_info.get('groups', []))}\"")
+            fout.write(",\"" + ','.join([g for g in student_info.get('groups', []) if g not in remove_groups]) + "\"")
             score = result.final_score
             if score is None:
                 score = 0
@@ -824,6 +839,19 @@ class CodeActivityTester:
             fout.write(json.dumps(res_json, indent=4))
         else:
             raise NotImplementedError
+
+    def export_code(self, out_dir: str, format: str = 'csv', override=False, feedback_file='Feedback.md'):
+        if os.path.exists(out_dir) and not override:
+            raise FileExistsError(f"Output file {out_dir} already exists. Use override=True to overwrite.")
+        os.makedirs(os.path.dirname(out_dir), exist_ok=True)
+        for result in self._reports.values():
+            submission_out_dir = os.path.join(out_dir, result.submission.get_info()['key'])
+            shutil.copytree(result.submission.get_local_path(), submission_out_dir, dirs_exist_ok=True)
+            with open(os.path.join(submission_out_dir, feedback_file), 'w') as fout:
+                if format == 'md':
+                    fout.write(result.to_markdown())
+                else:
+                    raise NotImplementedError(f"Format {format} not supported")
 
 
     def _has_ai_score(self):
