@@ -50,7 +50,8 @@ if __name__ == '__main__':
     # logging.basicConfig(filename='myapp.log', level=logging.INFO)
     logging.basicConfig(level=logging.INFO)
     # logging.basicConfig(level=logging.DEBUG)
-
-    print_repo_stats('GiVD-2025/p1-tracertoy-', ['a', 'b', 'c', 'f'], 1, 20, True, force=False,
+    groups = ['a', 'b', 'c', 'f']
+    groups = 'b'
+    print_repo_stats('GiVD-2025/p1-tracertoy-', groups, 1, 20, True, force=False,
                      local_path='./_data/givd/2526/pr1/repositories')
     #extract_form_stats()
