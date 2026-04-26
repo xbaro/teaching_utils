@@ -7,6 +7,7 @@ from teaching_utils.teaching_lib import (
     code_tester,
     test_utils,
     gtest_utils,
+    form_data_reader,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "code_tester",
     "test_utils",
     "gtest_utils",
+    "form_data_reader",
 ]

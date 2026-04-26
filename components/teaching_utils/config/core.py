@@ -1,7 +1,7 @@
+import logging
 import os
 from os import environ
 from dotenv import dotenv_values
-
 
 class Config:
 
@@ -16,10 +16,20 @@ class Config:
         self.public = "public"
         [setattr(self, key, value) for key, value in settings.items()]
 
+        if 'logger' in settings:
+            self.LOGGER = settings['logger']
+
     def __getattr__(self, item):
         attr = environ.get(item.upper())
         setattr(self, item, attr) if attr is not None else ...  # this is not really necessary
         return attr
+
+    @property
+    def logger(self):
+        return self.LOGGER
+
+    # Define a default logger
+    LOGGER = logging.getLogger(__name__)
 
     GITHUB_TOKEN = 'invalid'
     OPENAI_API_KEY = 'invalid'
