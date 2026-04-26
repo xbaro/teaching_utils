@@ -11,8 +11,8 @@ if __name__ == '__main__':
 
     print("SD")
 
-    #target_groups = ['B', 'C']
-    target_groups = ['C']
+    target_groups = ['B', 'C']
+    #target_groups = ['C']
 
     clean_data = False
     repo_stats = False
@@ -28,28 +28,29 @@ if __name__ == '__main__':
                 repositories = teaching_lib.repository.CodeRepositorySet()
                 repositories.load_repositories(f'SoftwareDistribuitUB-2025/practica-1-{target_group.lower()}', 11, 25)
 
-                repositories.export_stats(f'./_data/sd/pr1/repo_stats/{target_group}/')
+                repositories.export_stats(f'./_data/sd/26/pr1/repo_stats/{target_group}/')
 
         # Exporta tots els lliuraments i els separa per grups
         teaching_lib.submission_utils.export_groups(
-            './_data/sd/pr1/lliuraments',
-            './_data/sd/pr1/courseid_87020_participants.csv',
-            './_data/sd/pr1/out',
-            remove_existing=False,
+            './_data/sd/26/pr1/lliuraments',
+            './_data/sd/26/pr1/courseid_102337_participants.csv',
+            './_data/sd/26/pr1/out',
+            remove_existing=True,
             groups=target_groups,
         )
 
         for group in target_groups:
-            submissions = SubmissionSet.load_submissions(f'./_data/sd/pr1/out/groups/{group}')
+            submissions = SubmissionSet.load_submissions(f'./_data/sd/26/pr1/out/groups/{group}')
             tester = teaching_lib.code_tester.CodeActivityTester(
                 submissions,
                 'teaching_utils.teaching_lib.code_tester.JavaSubmissionTest',
                 options={
                     "max_time": 240,
                     "run_tests": True,
+                    "docker_pull_policy": "never",
                     "perform_analysis": False,
                     "code_extraction_max_char": -1,
-                    "host_tmp_basepath": "./_data/sd/pr1/tmp",
+                    "host_tmp_basepath": "./_data/sd/26/pr1/tmp",
                     "remove_tmp": False,
                     "multi_project": True,
                     "multi_project_structure": "folder",
@@ -60,13 +61,13 @@ if __name__ == '__main__':
                     }
                 },
             )
-            tester.run_tests(cache_file=f'./_data/sd/pr1/out/cache_group_{group}.pkl')
-            tester.export_results(f'./_data/sd/pr1/out/report{group}.csv',
+            tester.run_tests(cache_file=f'./_data/sd/26/pr1/out/cache_group_{group}.pkl')
+            tester.export_results(f'./_data/sd/26/pr1/out/report{group}.csv',
                                   override=True,
                                   format='csv',
-                                  remove_groups=['2024_364312_Q2_T1']
+                                  remove_groups=['2025_364312_Q2_T1']
                                   )
-            tester.export_code(f'./_data/sd/pr1/out/prepared/{group}',
+            tester.export_code(f'./_data/sd/26/pr1/out/prepared/{group}',
                                   override=True,
                                   format='md'
                                   )

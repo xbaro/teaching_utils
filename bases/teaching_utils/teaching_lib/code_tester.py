@@ -42,6 +42,7 @@ class RunSubmissionTest:
         self.max_time = config.get("max_time", 10)
         self.run_tests = config.get("run_tests", True)
         self.run_cmd = config.get("run_cmd")
+        self.docker_pull_policy = config.get("docker_pull_policy", "never")
         self.additional_mounts = config.get("additional_mounts", [])
 
         self.data_path = config.get("data_path")
@@ -137,6 +138,9 @@ class RunSubmissionTest:
             "-w", self._fix_path(work_path),
             "-v", f"{self._fix_path(host_code_path)}:{self.container_mount}",
         ]
+
+        if self.docker_pull_policy is not None:
+            docker_cmd.extend(["--pull", self.docker_pull_policy])
 
         if self.data_path is not None:
             docker_cmd.extend(["-v", f"{self._fix_path(os.path.abspath(self.data_path))}:{self.data_mount}"])
@@ -580,37 +584,79 @@ class JavaSubmissionTest(RunSubmissionTest):
                  config: Optional[dict] = None):
         if config is None:
             config = {}
-        config.update(
-            {
-                "image": image,
-                "max_time": max_time,
-                "run_cmd": (
-                    "PROJECTS=($(find . -name pom.xml -printf \"%d %p\n\" | sort -n | perl -pe 's/^\d+\s//;' | xargs dirname)) && "
-                    "PROJECT_DIR=${PROJECTS[0]} && "
-                    "cd $PROJECT_DIR && "
-                    "mkdir -p /mnt/code/results && "
-                    # "mvn test jacoco:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                    # "mvn test checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                    "mvn clean org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent test org.jacoco:jacoco-maven-plugin:0.8.13:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 && "
-                    "find . -type d -name surefire-reports | while read dir; do "
-                    "  MOD_NAME=$(basename $(dirname $(dirname \"$dir\"))); "
-                    "  MOD_PATH=$(dirname $(dirname \"$dir\")); "
-                    "  mkdir -p /mnt/code/results/surefire-reports/$MOD_NAME; "
-                    "  cp \"$dir\"/*.xml /mnt/code/results/surefire-reports/$MOD_NAME/. 2>/dev/null || true; "
-                    "  find \"$MOD_PATH\" -name jacoco.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ; "
-                    "  find \"$MOD_PATH\" -name checkstyle-result.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ;"
-                    "done"
-                ),
-                "result_path": "/mnt/code/results",
-                "grading_file": None,
-                "file_code_extensions": ['.java', ],
-                "line_comment_symbol": "//",
-                "additional_mounts": ["/tmp/maven_cache:/root/.m2/repository"]
-            }
+        config.setdefault("image", image)
+        config.setdefault("max_time", max_time)
+        config.setdefault(
+            "run_cmd",
+            (
+                "if [ ! -f pom.xml ]; then echo 'No pom.xml found in working directory' >&2; exit 2; fi && "
+                "mkdir -p /mnt/code/results && "
+                "mvn clean org.jacoco:jacoco-maven-plugin:0.8.13:prepare-agent test org.jacoco:jacoco-maven-plugin:0.8.13:report checkstyle:checkstyle > /mnt/code/results/maven_output.log 2>&1 || "
+                "  { cat /mnt/code/results/maven_output.log >&2; exit 1; } && "
+                "find . -type d -name surefire-reports | while read dir; do "
+                "  MOD_NAME=$(basename $(dirname $(dirname \"$dir\"))); "
+                "  MOD_PATH=$(dirname $(dirname \"$dir\")); "
+                "  mkdir -p /mnt/code/results/surefire-reports/$MOD_NAME; "
+                "  cp \"$dir\"/*.xml /mnt/code/results/surefire-reports/$MOD_NAME/. 2>/dev/null || true; "
+                "  find \"$MOD_PATH\" -name jacoco.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ; "
+                "  find \"$MOD_PATH\" -name checkstyle-result.xml -exec cp {} /mnt/code/results/surefire-reports/$MOD_NAME/. \\; ;"
+                "done"
+            ),
         )
+        config.setdefault("result_path", "/mnt/code/results")
+        config.setdefault("grading_file", None)
+        config.setdefault("file_code_extensions", ['.java', ])
+        config.setdefault("line_comment_symbol", "//")
+        config.setdefault("additional_mounts", ["/tmp/maven_cache:/root/.m2/repository"])
         super().__init__(submission_path, config)
         os.makedirs('/tmp/maven_cache', exist_ok=True)
         self.total_tests = 0
+
+    @staticmethod
+    def _archive_extract_dir(archive_path: str) -> str:
+        lower_path = archive_path.lower()
+        for suffix in ('.tar.gz', '.tar.bz2', '.tgz', '.zip', '.tar'):
+            if lower_path.endswith(suffix):
+                return archive_path[:-len(suffix)]
+        return os.path.splitext(archive_path)[0]
+
+    def _prepare_code_execution(self):
+        code_root = os.path.join(self.host_tmp, "code")
+        archive_extensions = ('.zip', '.tar', '.tar.gz', '.tgz', '.tar.bz2')
+
+        extracted = True
+        while extracted:
+            extracted = False
+            for root, _, files in os.walk(code_root):
+                for file_name in files:
+                    lower_name = file_name.lower()
+                    if not lower_name.endswith(archive_extensions):
+                        continue
+
+                    archive_path = os.path.join(root, file_name)
+                    extract_dir = self._archive_extract_dir(archive_path)
+                    if os.path.isdir(extract_dir) and os.listdir(extract_dir):
+                        continue
+
+                    os.makedirs(extract_dir, exist_ok=True)
+                    try:
+                        shutil.unpack_archive(archive_path, extract_dir)
+                        extracted = True
+                    except (shutil.ReadError, ValueError):
+                        logger.warning(f"Could not unpack nested archive: {archive_path}")
+
+    def _compute_working_directory(self):
+        code_root = os.path.join(self.host_tmp, "code")
+        project_roots = []
+
+        for root, _, files in os.walk(code_root):
+            if 'pom.xml' in files:
+                project_roots.append(root)
+
+        if not project_roots:
+            return None
+
+        return min(project_roots, key=lambda path: (path.count(os.sep), len(path)))
 
     def _load_result_tree(self, result_path: str) -> TestResultNode:
         root = TestResultNode(label="JUnit Multi-Module Tests", weight=1.0, children=[])
@@ -849,7 +895,11 @@ class CodeActivityTester:
             shutil.copytree(result.submission.get_local_path(), submission_out_dir, dirs_exist_ok=True)
             with open(os.path.join(submission_out_dir, feedback_file), 'w') as fout:
                 if format == 'md':
-                    fout.write(result.to_markdown())
+                    try:
+                        fout.write(result.to_markdown())
+                    except Exception as exc:
+                        logger.error(f"Error exporting feedback for submission {result.submission.get_key()}")
+                        fout.write("Error exporting feedback: " + str(exc))
                 else:
                     raise NotImplementedError(f"Format {format} not supported")
 
