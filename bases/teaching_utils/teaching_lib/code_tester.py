@@ -26,12 +26,13 @@ logger = logging.getLogger(__name__)
 class RunSubmissionTest:
     def __init__(self, submission_path: str, config: dict):
         """
-        Test runner using Docker and hierarchical test results.
+        Test runner using a container runtime and hierarchical test results.
 
         Args:
             submission_path (str): Path to student's submission.
             config (dict): Includes:
-                - image (str): Docker image name
+                - image (str): Container image name
+                - container_runtime (str): Runtime binary (e.g. docker, podman)
                 - max_time (int): Timeout in seconds
                 - run_cmd (str): Command inside container
                 - result_path (str): Folder where results.json is generated (inside container)
@@ -42,7 +43,10 @@ class RunSubmissionTest:
         self.max_time = config.get("max_time", 10)
         self.run_tests = config.get("run_tests", True)
         self.run_cmd = config.get("run_cmd")
-        self.docker_pull_policy = config.get("docker_pull_policy", "never")
+        self.container_runtime = config.get("container_runtime", "docker")
+        # Backward compatible with existing docker_* config keys.
+        self.container_pull_policy = config.get("container_pull_policy", config.get("docker_pull_policy", "never"))
+        self.container_run_args = config.get("container_run_args", [])
         self.additional_mounts = config.get("additional_mounts", [])
 
         self.data_path = config.get("data_path")
@@ -56,6 +60,7 @@ class RunSubmissionTest:
         self.host_tmp_prefix = config.get("host_tmp_prefix", "submission_")
         self.host_tmp = config.get("host_tmp", os.path.join(self.host_tmp_basepath, f"{self.host_tmp_prefix}{self.execution_id}", ''))
         self.container_mount = config.get("container_mount", "/mnt/code")
+        self.working_directory = config.get("working_directory")
 
         self.file_code_extensions = config.get("file_code_extensions", ['.py', '.java', '.c', '.h', '.cpp', '.hpp', '.hcc'])
         self.line_comment_symbol = config.get("line_comment_symbol", "#")
@@ -84,7 +89,92 @@ class RunSubmissionTest:
         pass
 
     def _compute_working_directory(self):
-        return None
+        return self._resolve_configured_working_directory(self._compute_code_root())
+
+    def _get_submission_code_path(self) -> str:
+        return os.path.abspath(os.path.join(self.host_tmp, "code"))
+
+    def _compute_code_root(self) -> str:
+        return self._get_submission_code_path()
+
+    def _find_repository_root(self, base_path: str) -> str:
+        base_path = os.path.abspath(base_path)
+        candidates = []
+
+        for root, dirs, files in os.walk(base_path):
+            dir_names = set(dirs)
+            file_names = set(files)
+            score = 0
+
+            if "docker-compose.yml" in file_names:
+                score += 4
+            if ".git" in dir_names:
+                score += 4
+            if "backend" in dir_names:
+                score += 3
+            if "frontend" in dir_names:
+                score += 3
+            if "pyproject.toml" in file_names:
+                score += 2
+            if "package.json" in file_names:
+                score += 2
+            if "manage.py" in file_names:
+                score += 1
+
+            if score > 0:
+                rel_root = os.path.relpath(root, base_path)
+                depth = 0 if rel_root == '.' else rel_root.count(os.sep) + 1
+                candidates.append((score, depth, len(root), root))
+
+        if len(candidates) == 0:
+            return base_path
+
+        return max(candidates, key=lambda item: (item[0], -item[1], -item[2]))[3]
+
+    def _resolve_configured_working_directory(self, base_path: str = None) -> str | None:
+        if self.working_directory is None:
+            return None
+
+        if base_path is None:
+            base_path = self._get_submission_code_path()
+
+        normalized_path = self.working_directory.replace("\\", "/").strip().strip("/")
+        if len(normalized_path) == 0 or normalized_path == '.':
+            return base_path
+
+        candidate = os.path.abspath(os.path.join(base_path, normalized_path))
+        if os.path.isdir(candidate):
+            return candidate
+
+        candidates = [
+            os.path.abspath(os.path.join(self.host_tmp, normalized_path)),
+            os.path.abspath(os.path.join(base_path, normalized_path)),
+        ]
+
+        suffix_path = normalized_path
+
+        for candidate in candidates:
+            if os.path.isdir(candidate):
+                return candidate
+
+        if len(suffix_path) == 0:
+            return base_path
+
+        matches = []
+        for root, _, _ in os.walk(base_path):
+            rel_root = os.path.relpath(root, base_path).replace(os.sep, '/')
+            if rel_root == '.':
+                continue
+            if rel_root == suffix_path or rel_root.endswith(f"/{suffix_path}"):
+                matches.append(root)
+
+        if len(matches) == 0:
+            return None
+
+        return min(
+            matches,
+            key=lambda path: (os.path.relpath(path, base_path).count(os.sep), len(path))
+        )
 
     def _load_result_tree(self, result_file_path: str) -> Optional[TestResultNode]:
         if not os.path.exists(result_file_path):
@@ -119,7 +209,7 @@ class RunSubmissionTest:
         return path
 
     def _execute_in_container(self) -> ExecutionReport:
-        host_code_path = os.path.abspath(os.path.join(self.host_tmp, "code"))
+        host_code_path = os.path.abspath(self._compute_code_root())
         host_results_path = os.path.join(host_code_path, os.path.basename(self.result_path))
         if self.grading_file is not None:
             results_file_path = os.path.join(host_results_path, self.grading_file)
@@ -133,30 +223,33 @@ class RunSubmissionTest:
             work_path = os.path.join(self.container_mount, os.path.relpath(os.path.abspath(work_path), host_code_path))
 
 
-        docker_cmd = [
-            "docker", "run", "--rm",
+        container_cmd = [
+            self.container_runtime, "run", "--rm",
             "-w", self._fix_path(work_path),
             "-v", f"{self._fix_path(host_code_path)}:{self.container_mount}",
         ]
 
-        if self.docker_pull_policy is not None:
-            docker_cmd.extend(["--pull", self.docker_pull_policy])
+        if self.container_pull_policy is not None:
+            container_cmd.append(f"--pull={self.container_pull_policy}")
+
+        if self.container_run_args:
+            container_cmd.extend(self.container_run_args)
 
         if self.data_path is not None:
-            docker_cmd.extend(["-v", f"{self._fix_path(os.path.abspath(self.data_path))}:{self.data_mount}"])
+            container_cmd.extend(["-v", f"{self._fix_path(os.path.abspath(self.data_path))}:{self.data_mount}"])
 
         for additional_mount in self.additional_mounts:
-            docker_cmd.extend(["-v", additional_mount])
-        docker_cmd.extend([
+            container_cmd.extend(["-v", additional_mount])
+        container_cmd.extend([
             self.image,
             "bash", "-c", self.run_cmd
         ])
 
         try:
-            # Run the command in the Docker container
+            # Run the command inside the selected container runtime.
             if self.run_tests:
                 result = subprocess.run(
-                    docker_cmd,
+                    container_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     timeout=self.max_time,
@@ -385,12 +478,28 @@ class PythonSubmissionTest(RunSubmissionTest):
                 "image": image,
                 "max_time": max_time,
                 "run_cmd": (
-                    "cd /mnt/code && "
-                    "mkdir -p results && "
-                    "pytest --json-report --json-report-file=results/test_report.json > results/pytest.out 2>&1; "
-                    "coverage run -m pytest > /dev/null 2>&1; "
-                    "coverage json -o results/coverage.json; "
-                    "flake8 . --format=json --output-file results/flake8.json"
+                    "mkdir -p /mnt/code/results && "
+                    "PY_RUN='python' && "
+                    "PYPROJECT_PATH=$(find . -name 'pyproject.toml' -type f -print -quit) && "
+                    "if [ -n \"$PYPROJECT_PATH\" ]; then "
+                    "  PROJECT_DIR=$(dirname \"$PYPROJECT_PATH\") && "
+                    "  (cd \"$PROJECT_DIR\" && (uv sync --frozen --dev --all-extras > /mnt/code/results/uv-sync.out 2>&1 || uv sync --dev --all-extras >> /mnt/code/results/uv-sync.out 2>&1 || uv sync >> /mnt/code/results/uv-sync.out 2>&1)) || true; "
+                    "  PY_RUN='uv run --with pytest --with pytest-json-report --with coverage --with flake8'; "
+                    "elif [ -f requirements.txt ]; then "
+                    "  python -m pip install --no-input -r requirements.txt > /mnt/code/results/pip-install.out 2>&1 || true; "
+                    "else "
+                    "  REQUIREMENTS_PATH=$(find . -name 'requirements.txt' -type f -print -quit) && "
+                    "  if [ -n \"$REQUIREMENTS_PATH\" ]; then "
+                    "    python -m pip install --no-input -r \"$REQUIREMENTS_PATH\" > /mnt/code/results/pip-install.out 2>&1 || true; "
+                    "  fi; "
+                    "fi && "
+                    "PYTEST_STATUS=0; "
+                    "$PY_RUN -m pytest --json-report --json-report-file=/mnt/code/results/test_report.json > /mnt/code/results/pytest.out 2>&1 || PYTEST_STATUS=$?; "
+                    "$PY_RUN -m coverage run -m pytest > /dev/null 2>&1 || true; "
+                    "$PY_RUN -m coverage json -o /mnt/code/results/coverage.json > /mnt/code/results/coverage.out 2>&1 || true; "
+                    "$PY_RUN -m ruff check . --output-format json > /mnt/code/results/flake8.json 2> /mnt/code/results/flake8.out || true; "
+                    "if [ ! -f /mnt/code/results/test_report.json ]; then exit ${PYTEST_STATUS:-1}; fi; "
+                    "exit $PYTEST_STATUS"
                 ),
                 "result_path": "/mnt/code/results",
                 "grading_file": "test_report.json"
@@ -398,32 +507,129 @@ class PythonSubmissionTest(RunSubmissionTest):
         )
         super().__init__(submission_path, config)
 
+    def _compute_code_root(self) -> str:
+        return self._find_repository_root(self._get_submission_code_path())
+
+    def _read_log_file(self, path: str) -> str | None:
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r', encoding='utf-8', errors='ignore') as fin:
+            return fin.read()
+
+    def _summarize_failure_logs(self, results_dir: str, *log_names: str) -> str:
+        log_texts = []
+        for log_name in log_names:
+            log_path = os.path.join(results_dir, log_name)
+            log_text = self._read_log_file(log_path)
+            if log_text:
+                log_texts.append(log_text)
+
+        if len(log_texts) == 0:
+            return "Result file not generated."
+
+        combined_logs = "\n".join(log_texts)
+
+        build_match = re.search(r"Failed to build `([^`]+)`", combined_logs)
+        if build_match is not None:
+            package_name = build_match.group(1)
+            if "pkg-config: not found" in combined_logs:
+                return f"Dependency installation failed while building {package_name}: pkg-config not found."
+            return f"Dependency installation failed while building {package_name}."
+
+        missing_module_match = re.search(r"ModuleNotFoundError: No module named '([^']+)'", combined_logs)
+        if missing_module_match is not None:
+            return f"Missing Python module: {missing_module_match.group(1)}"
+
+        import_error_match = re.search(r"ImportError: (.+)", combined_logs)
+        if import_error_match is not None:
+            return import_error_match.group(1).strip()
+
+        for line in combined_logs.splitlines():
+            stripped_line = line.strip()
+            if stripped_line:
+                return stripped_line
+
+        return "Result file not generated."
+
     def _load_result_tree(self, result_file_path: str) -> TestResultNode:
         results_dir = os.path.dirname(result_file_path)
         root = TestResultNode(label="Python Grading", weight=1.0, children=[])
 
         # Load pytest test results
         try:
-            with open(os.path.join(results_dir, "test_report.json")) as f:
+            test_report_path = os.path.join(results_dir, "test_report.json")
+            if not os.path.exists(test_report_path):
+                raise FileNotFoundError(self._summarize_failure_logs(results_dir, "pytest.out", "uv-sync.out", "pip-install.out"))
+
+            with open(test_report_path) as f:
                 test_json = json.load(f)
-            test_results = [
-                TestResultNode(
-                    label=t["nodeid"],
-                    passed=t["outcome"] == "passed",
-                    weight=1.0 / len(test_json["tests"]),
-                    message=t.get("longrepr", "")
-                )
-                for t in test_json["tests"]
-            ]
+            
+            # Check if tests were collected
+            tests_list = test_json.get("tests", [])
+            if not tests_list:
+                # No tests collected - check for collection errors
+                collectors = test_json.get("collectors", [])
+                error_messages = []
+                for collector in collectors:
+                    if collector.get("outcome") == "failed" and collector.get("longrepr"):
+                        error_msg = collector.get("longrepr", "Unknown error")
+                        # Extract key info from error (e.g., ModuleNotFoundError: No module named 'django')
+                        if "ModuleNotFoundError" in error_msg:
+                            module_name = error_msg.split("No module named '")[-1].split("'")[0] if "No module named" in error_msg else "unknown"
+                            error_messages.append(f"Missing module: {module_name}")
+                        elif "ImportError" in error_msg:
+                            error_messages.append("Import error during collection")
+                        else:
+                            # Get first line of error
+                            first_line = error_msg.split('\n')[0]
+                            if first_line:
+                                error_messages.append(first_line)
+                
+                if error_messages:
+                    error_summary = "; ".join(set(error_messages))
+                    test_results = [TestResultNode(
+                        label="Collection Failed",
+                        passed=False,
+                        weight=1.0,
+                        message=f"Tests could not be collected: {error_summary}"
+                    )]
+                else:
+                    test_results = [TestResultNode(
+                        label="No tests found",
+                        passed=False,
+                        weight=1.0,
+                        message="No test files were collected"
+                    )]
+                self.total_tests = 0
+            else:
+                # Tests were collected and we have results
+                test_results = [
+                    TestResultNode(
+                        label=t["nodeid"],
+                        passed=t["outcome"] == "passed",
+                        weight=1.0 / len(tests_list),
+                        message=t.get("longrepr", "")
+                    )
+                    for t in tests_list
+                ]
+                self.total_tests = len(tests_list)
+            
             root.children.append(TestResultNode(label="Tests", weight=0.6, children=test_results))
         except Exception as e:
             root.children.append(TestResultNode(label="Tests", weight=0.6, passed=False, message=f"Test error: {e}"))
+            self.total_tests = 0
 
         # Load coverage results
         try:
-            with open(os.path.join(results_dir, "coverage.json")) as f:
+            coverage_path = os.path.join(results_dir, "coverage.json")
+            if not os.path.exists(coverage_path):
+                raise FileNotFoundError(self._summarize_failure_logs(results_dir, "coverage.out", "pytest.out", "uv-sync.out"))
+
+            with open(coverage_path) as f:
                 coverage_data = json.load(f)
-            percent = coverage_data.get("meta", {}).get("coverage_percent", 0)
+            percent = coverage_data.get("totals", {}).get("percent_covered")
+            if percent is None:
+                percent = coverage_data.get("meta", {}).get("coverage_percent", 0)
             passed = percent >= 80
             root.children.append(TestResultNode(
                 label="Coverage",
@@ -436,9 +642,18 @@ class PythonSubmissionTest(RunSubmissionTest):
 
         # Load linting results
         try:
-            with open(os.path.join(results_dir, "flake8.json")) as f:
+            flake8_path = os.path.join(results_dir, "flake8.json")
+            if not os.path.exists(flake8_path):
+                raise FileNotFoundError(self._summarize_failure_logs(results_dir, "flake8.out", "pytest.out", "uv-sync.out"))
+
+            with open(flake8_path) as f:
                 lint_data = json.load(f)
-            issues = sum(len(file_issues) for file_issues in lint_data.values())
+            if isinstance(lint_data, list):
+                issues = len(lint_data)
+            elif isinstance(lint_data, dict):
+                issues = sum(len(file_issues) for file_issues in lint_data.values())
+            else:
+                raise ValueError(f"Unsupported lint report format: {type(lint_data)}")
             passed = issues == 0
             msg = f"{issues} issue(s) found"
             root.children.append(TestResultNode(label="Linting", weight=0.2, passed=passed, message=msg))
@@ -801,6 +1016,9 @@ class CodeActivityTester:
 
         return report
 
+    def get_reports(self) -> dict[str, ExecutionReport]:
+        return self._reports
+
 
     def run_tests(self, start: int = 0, limit: int = None, cache_file: str = None ):
         cache = {}
@@ -956,10 +1174,49 @@ class CodeActivityTester:
         feedback = []
         if report.test_tree:
             feedback.append(f"Test Results: {report.test_tree.label}")
-            feedback.append(f"  => {report.total_tests} tests found.")
-            for child in report.test_tree.children:
-                feedback.append(f"    - {child.label}: {'Passed' if child.passed else 'Failed'}")
+            feedback.append(f"Score: {report.final_score:.2f} / 1.00 ({report.final_score*100:.1f}%)")
+            feedback.append(f"Total tests: {report.total_tests}")
+            feedback.append("")
+            
+            # Add detailed breakdown of test results
+            self._add_test_breakdown(report.test_tree, feedback, indent=0)
         if report.analysis:
             feedback.append(f"Code Analysis: {report.analysis}")
         return "\n".join(feedback).replace("\"", "'")
+    
+    def _add_test_breakdown(self, node: TestResultNode, feedback: list, indent: int = 0):
+        """Recursively add test breakdown with detailed results."""
+        indent_str = "  " * indent
+        
+        # Count tests in this subtree
+        total_tests_in_node = self._count_tests_in_node(node)
+        passed_tests_in_node = self._count_passed_tests_in_node(node)
+        
+        # Show node info with test count
+        status = "✅" if node.passed else ("❌" if node.passed is False else "⏳")
+        test_count_str = f" [{passed_tests_in_node}/{total_tests_in_node}]" if total_tests_in_node > 0 else ""
+        
+        if indent > 0:  # Don't show root node label
+            feedback.append(f"{indent_str}{status} {node.label}{test_count_str}")
+            if node.message and node.passed is False:
+                msg_lines = node.message.split('\n')
+                for msg_line in msg_lines[:3]:  # Show first 3 lines of message
+                    if msg_line.strip():
+                        feedback.append(f"{indent_str}    └─ {msg_line.strip()}")
+        
+        # Recursively process children
+        for child in node.children:
+            self._add_test_breakdown(child, feedback, indent + 1)
+    
+    def _count_tests_in_node(self, node: TestResultNode) -> int:
+        """Count total tests in a node subtree."""
+        if not node.children:
+            return 1
+        return sum(self._count_tests_in_node(child) for child in node.children)
+    
+    def _count_passed_tests_in_node(self, node: TestResultNode) -> int:
+        """Count passed tests in a node subtree."""
+        if not node.children:
+            return 1 if node.passed else 0
+        return sum(self._count_passed_tests_in_node(child) for child in node.children)
 
